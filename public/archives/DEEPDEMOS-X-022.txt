@@ -1,0 +1,16 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-022 / 体感光剑
+DEEPSEEK-V4-FLASH
+
+平台：未标注
+收录日期：2026-10-11
+作者：nnknnk
+类型：LINK
+
+手机连接屏幕作为输入端的beat saber复刻版
+
+作品记录
+1. 生成模型：DEEPSEEK-V4-FLASH
+
+来源：https://deepdemos.top/demo/demo-9f720a44
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

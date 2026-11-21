@@ -11,29 +11,37 @@ export function createArchiveLighting(
   look: LightingLook = "baseline",
 ) {
   const refined = look === "refined";
-  renderer.toneMappingExposure = refined ? 1.0 : 1.05;
+  renderer.toneMappingExposure = refined ? 0.98 : 1.0;
   const pmrem = new THREE.PMREMGenerator(renderer);
   const room = new RoomEnvironment();
   scene.environment = pmrem.fromScene(room, 0.04).texture;
   room.dispose();
   pmrem.dispose();
-  scene.environmentIntensity = refined ? 0.52 : 0.48;
-  scene.add(
-    new THREE.HemisphereLight(
-      "#fffaf5",
-      refined ? "#b49b80" : "#b4a18c",
-      refined ? 0.5 : 0.65,
-    ),
+  // Keep the room probe only for glass and metal reflections. The actual
+  // modelling light is the low side key below; no hemisphere wash.
+  scene.environmentIntensity = refined ? 0.2 : 0.18;
+  const key = new THREE.SpotLight(
+    "#ffd8ba",
+    refined ? 980 : 900,
+    120,
+    0.5,
+    0.85,
+    1.65,
   );
-  const key = new THREE.DirectionalLight(
-    refined ? "#fff4e5" : "#fff7ed",
-    refined ? 1.7 : 1.4,
+  key.position.set(-30, 8, 20);
+  key.target.position.set(0, 0, 0);
+  // A broad, soft cone keeps the array covered while the inverse-square
+  // falloff still separates the near files from the rows behind them.
+  key.castShadow = true;
+  key.shadow.camera.near = 0.5;
+  key.shadow.camera.far = 120;
+  key.shadow.camera.updateProjectionMatrix();
+  const fill = new THREE.DirectionalLight(
+    "#f4e8d8",
+    refined ? 0.07 : 0.08,
   );
-  key.position.set(
-    ...((refined ? [-8, 14, 4] : [-6, 14, -5]) as [number, number, number]),
-  );
-  const fill = new THREE.DirectionalLight("#ffffff", refined ? 0.3 : 0.6);
-  fill.position.set(7, 8, -10);
+  fill.position.set(18, 9, -14);
+  scene.add(key.target);
   scene.add(key, fill);
-  return key;
+  return { key, fill };
 }

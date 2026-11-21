@@ -1,0 +1,16 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-031 / 黑洞吸积盘与时空引力透镜渲染
+未标注
+
+平台：未标注
+收录日期：2026-08-19
+作者：HWDyzzZ
+类型：WEB
+
+实时 WebGL 黑洞光线弯曲、引力红移与吸积盘相对论多普勒效应渲染。
+
+作品记录
+1. 题材：图形学
+
+来源：https://deepdemos.top/demo/demo-369a5f94
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

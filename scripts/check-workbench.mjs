@@ -52,6 +52,6 @@ assert.ok(Object.values(quiet).every(value => value === false), 'WE can hide eve
 const clockOnly = applyVisibilityProperties(quiet, {showclock:{value:true}});
 assert.equal(clockOnly.clock, true);
 assert.equal(clockOnly.settings, false, 'Partial host changes preserve hidden settings');
-assert.deepEqual(applyVisibilityProperties(clockOnly,{sound:{value:true},showtasks:{value:'false'}}),clockOnly,'Unrelated/invalid properties cannot reset visibility');
+assert.deepEqual(applyVisibilityProperties(clockOnly,{colortheme:{value:'dark'},showtasks:{value:'false'}}),clockOnly,'Unrelated/invalid properties cannot reset visibility');
 assert.deepEqual(applyVisibilityProperties(defaultWorkbenchVisibility(),hiddenProps),quiet,'Startup host properties reproduce the saved composition');
 console.log('Workbench host visibility: all hidden, clock-only, partial updates and startup restoration passed.');

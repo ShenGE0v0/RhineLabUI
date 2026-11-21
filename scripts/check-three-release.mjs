@@ -10,7 +10,7 @@ await page.goto('http://127.0.0.1:5176/?scene=archive');await page.waitForFuncti
 const apply=async(values)=>{await page.evaluate(values=>window.wallpaperPropertyListener.applyUserProperties(Object.fromEntries(Object.entries(values).map(([k,value])=>[k,{value}]))),values);await page.waitForTimeout(300)};
 const stats=()=>page.evaluate(()=>window.rhine.stats());
 const click=()=>page.locator('[data-action="toggle-three"]').click();
-await apply({desktopmode:'workbench',boot:false,superperformance:true,screenfinish:false,hudparallax:false,uifrost:false,sound:false,music:false,reduced:false});
+await apply({desktopmode:'workbench',boot:false,superperformance:true,screenfinish:false,hudparallax:false,uifrost:false,music:false,reduced:false});
 await page.waitForFunction(()=>window.rhine.stats().mode==='archive');
 await page.evaluate(()=>{window.contextLosses=0;const canvas=document.querySelector('#three-scene canvas');canvas.addEventListener('webglcontextlost',()=>window.contextLosses++);window.oldCanvas=canvas});
 const before=await stats();

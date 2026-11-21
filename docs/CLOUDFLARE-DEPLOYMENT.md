@@ -1,4 +1,12 @@
-# Cloudflare Pages 部署
+# Cloudflare Pages 构建
+
+在项目根目录安装依赖后执行 `npm run build:cloudflare`。手动上传时，`release/cloudflare/latest.json` 指向本次静态发行目录。连接你自己的 Pages 项目后，Git 构建使用同一命令，环境变量 `CF_PAGES=1` 时输出到 `release/cloudflare/site`。
+
+发行包从 PWA 资源清单生成，包含缓存标头和缺失资源的 404 页面。构建使用仓库随附的 MiSans 字体资源。
+
+## 上游部署记录
+
+以下记录对应 LBEILC / RhineLabUI 的部署历史。上游项目名、域名和字体授权仅用于查阅历史。
 
 ## 2026-09-26 首页 ERR_FAILED 修复
 

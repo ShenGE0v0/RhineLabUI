@@ -1,0 +1,17 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-012 / 手部模型
+GROK4.7
+
+平台：未标注
+收录日期：2026-09-23
+作者：GOD
+类型：WEB
+
+交互式 Three.js 男性右手 3D 演示（素手）。已修正指骨屈伸轴向，可旋转查看掌心/手背，滑动屈指。基于 Godot XR Tools 手模与写实肤色贴图。
+
+作品记录
+1. 生成模型：GROK4.7
+2. 题材：3D建模
+
+来源：https://deepdemos.top/demo/grok4-7-b1669ce6
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

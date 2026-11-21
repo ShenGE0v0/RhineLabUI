@@ -1,0 +1,18 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-013 / MBT-X · 主战坦克实时渲染
+V4.1FLASH0908
+
+平台：DSH
+收录日期：2026-09-08
+作者：public
+类型：WEB
+
+现代主战坦克 3D 实时渲染模型：炮塔、履带、装甲细节完整，支持自由视角观察与缩放。纯前端单文件，Three.js 实现，双击即可离线运行。
+
+作品记录
+1. 生成模型：V4.1FLASH0908
+2. 使用平台：DSH
+3. 题材：3D建模
+
+来源：https://deepdemos.top/demo/mbt-x-9e2743aa
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

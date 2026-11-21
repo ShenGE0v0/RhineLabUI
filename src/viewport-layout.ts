@@ -1,16 +1,7 @@
-/** Reference coordinates remain exact during the film and at 1920 × 1080. */
-export function openingLayout(width: number, height: number) {
-  width = Math.max(1, width); height = Math.max(1, height);
-  const scale = Math.min(height / 1080, width / 1280);
-  return { width: width / scale, height: height / scale, scale, kind: "opening" as const };
-}
-export function viewportLayout(width: number, height: number, coarse: boolean, cinematic = false) {
+/** Reference coordinates remain exact at 1920 × 1080. */
+export function viewportLayout(width: number, height: number, coarse: boolean) {
   width = Math.max(1, width);
   height = Math.max(1, height);
-  if (cinematic) return {
-    width: 1920, height: 1080, scale: Math.min(width / 1920, height / 1080),
-    kind: "cinematic" as const,
-  };
   const portrait = width / height < 1.05;
   const compact = portrait || width < 1100 || (coarse && height < 600);
   const scale = compact ? 1 : height / 1080;
@@ -24,8 +15,9 @@ export function archiveFraming(width: number, height: number, span: number, deta
   const portrait = aspect < 1.05;
   const baseSpan = span + (5.9 - span) * detail;
   const portraitDetailSpan = Math.max(6.3 / aspect, 3.7 * height / Math.max(100, 0.54 * height - 156));
+  const portraitOverviewSpan = 8.4 / aspect * 0.9;
   const viewSpan = portrait
-    ? Math.max(baseSpan, 8.4 / aspect + (portraitDetailSpan - 8.4 / aspect) * detail)
+    ? Math.max(baseSpan, portraitOverviewSpan + (portraitDetailSpan - portraitOverviewSpan) * detail)
     : Math.max(baseSpan, baseSpan * (16 / 9) / aspect);
   return {
     span: viewSpan,

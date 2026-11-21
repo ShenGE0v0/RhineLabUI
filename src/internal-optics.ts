@@ -5,25 +5,25 @@ const surfaces: Record<
   { color: string; roughness: number; opacity: number; order: number }
 > = {
   Optical_Glass_Body: {
-    color: "#929894",
+    color: "#cbb9a1",
     roughness: 0.38,
     opacity: 0.27,
     order: 20,
   },
   Optical_Glass_Roof: {
-    color: "#929b94",
+    color: "#d8c8b2",
     roughness: 0.34,
     opacity: 0.42,
     order: 24,
   },
   Optical_Glass_Edge: {
-    color: "#edf0e7",
+    color: "#e2d5c3",
     roughness: 0.19,
     opacity: 0.9,
     order: 28,
   },
   Optical_Bridge_Glass: {
-    color: "#a0aca2",
+    color: "#d2c1aa",
     roughness: 0.32,
     opacity: 0.36,
     order: 26,

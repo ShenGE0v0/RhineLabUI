@@ -1,4 +1,6 @@
-# 手动发布到 Wallpaper Engine 创意工坊
+# 上游 Wallpaper Engine 创意工坊发布记录
+
+以下为 LBEILC / RhineLabUI 的历史记录。DEEPDEMOS 本地构建使用独立的壁纸模板。
 
 正式名称：**Rhine Lab · 莱茵生命交互桌面**。
 

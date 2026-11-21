@@ -8,7 +8,7 @@ for (const system of [false, true]) {
   }
   assert.equal(motionPresetFor(createMotionPreferences(fullMotion(), system)), 'full');
   assert.equal(motionPresetFor(createMotionPreferences(reducedMotion(), system)), 'reduced');
-  assert.equal(motionPresetFor(createMotionPreferences({ ...fullMotion(), boot: false }, system)), 'custom');
+  assert.equal(motionPresetFor(createMotionPreferences({ ...fullMotion(), selectionWave: false }, system)), 'custom');
 }
 // Old saved scroll values must not change the preset or discard other choices.
 for (const motion of [fullMotion(), reducedMotion(), { ...fullMotion(), modelDecryption: false }]) {
@@ -17,7 +17,7 @@ for (const motion of [fullMotion(), reducedMotion(), { ...fullMotion(), modelDec
     assert.deepEqual(restored, motion);
     assert.equal(motionPresetFor(restored), motionPresetFor(motion));
     assert.ok(!motionSettingsMarkup(restored).includes('smoothScroll'));
-    assert.equal(Object.keys(restored).length, 14);
+    assert.equal(Object.keys(restored).length, 13);
   }
 }
 console.log('Motion preferences: 12 initialization cases and 6 retired-scroll migration cases passed.');

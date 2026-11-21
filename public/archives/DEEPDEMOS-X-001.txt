@@ -1,0 +1,16 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-001 / 汐見漁港·太阳雨
+CLAUDE-SONNET-5.5
+
+平台：未标注
+收录日期：2026-10-26
+作者：admin
+类型：WEB
+
+用 three.js 制作一个「太阳雨中的小渔港堤岸」微缩场景
+
+作品记录
+1. 生成模型：CLAUDE-SONNET-5.5
+
+来源：https://deepdemos.top/demo/demo-98003103
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

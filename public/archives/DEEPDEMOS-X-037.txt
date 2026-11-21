@@ -1,0 +1,18 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-037 / 叙拉古出租车
+DSV4-FLASH-VISION
+
+平台：DSH
+收录日期：2026-08-28
+作者：0neKbyte
+类型：WEB
+
+《明日方舟》！扮演荒芜拉普兰德在叙拉古里开出租车！
+
+作品记录
+1. 生成模型：DSV4-FLASH-VISION
+2. 使用平台：DSH
+3. 生成轮数：7
+
+来源：https://deepdemos.top/demo/demo-6b49a30c
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

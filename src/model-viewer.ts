@@ -15,23 +15,17 @@ import { fullMotion, type MotionPreferences } from "./motion-preferences";
 import { inputDevice, onInputDevice } from "./gamepad";
 
 const PARTS = [
-  { id: "fasteners", label: "紧固件", en: "FASTENERS", depth: 2.75 },
-  { id: "cover", label: "透明盖板", en: "OPTICAL COVER", depth: 1.85 },
-  {
-    id: "optical-lenses",
-    label: "折射环组",
-    en: "REFRACTIVE RINGS",
-    depth: 0.75,
-  },
-  { id: "optical-core", label: "光学核心", en: "OPTICAL CORE", depth: -0.15 },
-  { id: "substrate", label: "信息基板", en: "SUBSTRATE", depth: -1.1 },
-  { id: "carrier", label: "背板与框架", en: "CARRIER", depth: -2.05 },
+  { id: "card", label: "印刷卡面", en: "PRINTED CARD", depth: 1.6 },
+  { id: "body", label: "白色主体", en: "SHELL", depth: 0 },
 ] as const;
 
 type ModelSource = {
   model: THREE.Group;
+  centerY?: number;
   dispose: () => void;
   setClarity?: (value: number) => void;
+  /** 模型里有没有可揭示的半透明层；没有时隐藏清晰／磨砂开关。 */
+  hasReveal?: boolean;
 };
 export class ModelViewer {
   private themeAmount = 0;
@@ -67,6 +61,7 @@ export class ModelViewer {
   private controlCamera = this.camera.clone();
   private cameraMotion = new ViewerCameraMotion(this.camera);
   private controls: OrbitControls;
+  private keyLight: THREE.SpotLight;
   private source?: ModelSource;
   private groups = new Map<string, THREE.Group>();
   private spread = { value: 0, velocity: 0 };
@@ -94,9 +89,6 @@ export class ModelViewer {
   constructor(
     parent: HTMLElement,
     onClose: () => void,
-    private onSound: (
-      sound: "explode" | "assemble" | "tick",
-    ) => void = () => {},
   ) {
     this.onClose = onClose;
     this.root = document.createElement("section");
@@ -110,7 +102,7 @@ export class ModelViewer {
       <div class="scene-atmosphere viewer-atmosphere" aria-hidden="true"></div>
       <header class="viewer-header">
         <button class="viewer-back" data-viewer="close">← <span>返回档案</span><kbd>ESC</kbd></button>
-        <div class="viewer-heading"><span>RHINE LAB / OBJECT STUDY</span><h2 id="viewer-title">档案模型</h2><p id="viewer-file"></p></div>
+        <div class="viewer-heading"><span>DEEPDEMOS / OBJECT STUDY</span><h2 id="viewer-title">档案模型</h2><p id="viewer-file"></p></div>
         <span class="viewer-index">360<span>°</span></span>
       </header>
       <div class="viewer-surface" role="group" aria-label="玻璃模式"><button data-viewer="clear" aria-pressed="true">清晰</button><button data-viewer="frosted" aria-pressed="false">磨砂</button></div>
@@ -137,11 +129,54 @@ export class ModelViewer {
       "档案三维模型：拖动旋转，方向键平移，滚轮或加减键缩放，Home 复位",
     );
     this.canvasHost.appendChild(this.renderer.domElement);
-    this.scene.background = new THREE.Color("#eae5e1");
-    this.scene.fog = new THREE.Fog("#eae5e1", 13.5, 26.5);
+    this.scene.background = new THREE.Color("#f3eee8");
+    this.scene.fog = new THREE.Fog("#f3eee8", 13.5, 26.5);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.VSMShadowMap;
     // Render-target textures belong to their WebGL context. Recreate the main
     // scene's light room here so this renderer receives its actual illumination.
-    createArchiveLighting(this.renderer, this.scene);
+    const { key, fill } = createArchiveLighting(this.renderer, this.scene);
+    this.keyLight = key;
+    this.keyLight.color.set("#ffead6");
+    // The viewer uses the same low side key, but closer and weaker because the
+    // object is only a few units from the light. The card face still catches
+    // the key and the shadow catcher receives a readable soft shadow.
+    this.keyLight.position.set(-8, 6, 9);
+    this.keyLight.intensity = 260;
+    this.keyLight.distance = 40;
+    this.keyLight.angle = 0.5;
+    this.keyLight.penumbra = 0.85;
+    this.keyLight.decay = 1.65;
+    this.keyLight.target.position.set(0, 0, 0);
+    fill.color.set("#ffead8");
+    fill.position.set(10, 8, 12);
+    fill.intensity = 0.2;
+    this.scene.add(new THREE.HemisphereLight("#fff3e8", "#b88b68", 0.24));
+    // Glass needs a little probe reflection even when the modelling light is
+    // deliberately directional; keep it well below the old uniform wash.
+    this.scene.environmentIntensity = 0.3;
+    this.keyLight.castShadow = true;
+    this.keyLight.shadow.mapSize.set(2048, 2048);
+    this.keyLight.shadow.radius = 8;
+    this.keyLight.shadow.blurSamples = 8;
+    this.keyLight.shadow.bias = -0.0004;
+    this.keyLight.shadow.normalBias = 0.02;
+    this.keyLight.shadow.camera.near = 0.5;
+    this.keyLight.shadow.camera.far = 40;
+    this.keyLight.shadow.camera.updateProjectionMatrix();
+    const shadowCatcher = new THREE.Mesh(
+      new THREE.PlaneGeometry(30, 20),
+      new THREE.ShadowMaterial({
+        color: "#2b2823",
+        opacity: 0.08,
+        transparent: true,
+        side: THREE.FrontSide,
+      }),
+    );
+    shadowCatcher.rotation.x = -Math.PI / 2;
+    shadowCatcher.position.set(0, -2.0, 0);
+    shadowCatcher.receiveShadow = true;
+    this.scene.add(shadowCatcher);
     this.camera.position.copy(this.initialCamera);
     this.controlCamera.copy(this.camera);
     this.controls = new OrbitControls(
@@ -178,19 +213,15 @@ export class ModelViewer {
       if (this.loading || !this.source) return;
       if (action === "clear" || action === "frosted") {
         this.setSurface(action === "clear");
-        this.onSound("tick");
       }
       if (action === "explode" && this.targetSpread !== 1) {
         this.setExploded(true);
-        this.onSound("explode");
       }
       if (action === "assemble" && this.targetSpread !== 0) {
         this.setExploded(false);
-        this.onSound("assemble");
       }
       if (action === "reset") {
         this.resetView();
-        this.onSound("tick");
       }
     });
     this.root.addEventListener("keydown", (event) => this.keydown(event));
@@ -246,7 +277,7 @@ export class ModelViewer {
     this.root.dataset.transition = "opening";
     this.root.querySelector("#viewer-title")!.textContent = title;
     this.root.querySelector("#viewer-file")!.textContent =
-      "FILE " + id + " / INTERNAL DATABASE";
+      "FILE " + id + " / DEMO ARCHIVE";
     this.spread = { value: 0, velocity: 0 };
     this.targetSpread = 0;
     this.clarity = { value: 1, velocity: 0 };
@@ -277,6 +308,10 @@ export class ModelViewer {
         return;
       }
       this.source = source;
+      // 没有半透明盖板的模型，清晰／磨砂开关没有作用对象，直接隐藏而不是留一个死按钮。
+      const surfaceGroup =
+        this.root.querySelector<HTMLElement>(".viewer-surface");
+      if (surfaceGroup) surfaceGroup.hidden = !source.hasReveal;
       for (const part of PARTS) {
         const group = new THREE.Group();
         group.name = part.id;
@@ -287,7 +322,7 @@ export class ModelViewer {
         group?.add(child);
       }
       for (const group of this.groups.values()) source.model.add(group);
-      source.model.position.set(0, -1.85, 0);
+      source.model.position.set(0, -(source.centerY ?? 1.85), 0);
       this.scene.add(source.model);
       applyTextureQuality(source.model, this.renderer, this.quality);
       this.loading = false;
@@ -517,7 +552,6 @@ export class ModelViewer {
     if (event.key === "Home") {
       event.preventDefault();
       this.resetView();
-      this.onSound("tick");
       return;
     }
     if (["+", "=", "-"].includes(event.key)) {

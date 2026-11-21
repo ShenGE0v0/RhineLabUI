@@ -15,7 +15,7 @@ test("all forty downloads match the shared content, including the UTF-8 BOM", as
       (
         await readFile(
           new URL(
-            `../public/archives/RHINE-LAB-${record.id}.txt`,
+            `../public/archives/DEEPDEMOS-${record.id}.txt`,
             import.meta.url,
           ),
           "utf8",
@@ -65,7 +65,10 @@ const invalidCases = [
   [
     "unbalanced columns",
     (c) => {
-      c.records[0].category = c.columns[0];
+      // 不能假设 records[0] 不在第一列：内容按列顺序排列时它就是第一列。
+      // 找一条不在第一列的记录挪过去，制造每列八份的失衡。
+      const target = c.records.find((r) => r.category !== c.columns[0]);
+      target.category = c.columns[0];
     },
     /八份档案/,
   ],

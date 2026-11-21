@@ -1,0 +1,16 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-038 / 实时胜率五子棋
+未标注
+
+平台：未标注
+收录日期：2026-08-21
+作者：staralsnow
+类型：WEB
+
+双人对战/人机对战，可实时查看胜率及在各点落子的胜率热图
+
+作品记录
+1. 匿名上传，未标注生成信息
+
+来源：https://deepdemos.top/demo/demo-ce927755
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

@@ -1,0 +1,18 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-036 / 废弃医院
+DEEPSEEK-V4-PRO
+
+平台：未标注
+收录日期：2026-08-26
+作者：Knight
+类型：WEB
+
+DeepSeek V4 Pro生成的心理恐怖游戏
+
+作品记录
+1. 生成模型：DEEPSEEK-V4-PRO
+2. 生成轮数：1
+3. 题材：3D建模 / 仿真
+
+来源：https://deepdemos.top/demo/demo-6558a0fe
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

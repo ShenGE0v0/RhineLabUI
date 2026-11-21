@@ -24,4 +24,4 @@ const baseline=label==='baseline'?{name:'performance-baseline',enforce:'pre',loa
  const name=originalFiles.find(name=>id.replaceAll('\\','/').endsWith('/src/'+name));
  if(name)return execFileSync('git',['show',`${baselineCommit}:src/${name}`],{encoding:'utf8'});
 }}:null;
-await build({plugins:baseline?[baseline]:[],build:{outDir:`release/performance-${label}`,rollupOptions:{input:{benchmark:'reference/performance.html',hud:'reference/hud-performance.html',app:'index.html'}}}});
+await build({plugins:baseline?[baseline]:[],build:{outDir:`release/performance-${label}`,rollupOptions:{input:{benchmark:'reference/performance.html',app:'index.html'}}}});

@@ -1,0 +1,63 @@
+Lobe Icons · @lobehub/icons-static-svg 1.104.0
+Source: https://github.com/lobehub/lobe-icons
+Distribution: https://unpkg.com/@lobehub/icons-static-svg@1.104.0/icons/
+Brand marks identify model providers and belong to their respective owners.
+
+Local SVG filenames and corresponding upstream filenames:
+adobe.svg  adobe-color.svg
+ai21.svg  ai21.svg
+alibaba.svg  alibabacloud-color.svg
+anthropic.svg  anthropic.svg
+apple.svg  apple.svg
+aws.svg  aws-color.svg
+baichuan.svg  baichuan-color.svg
+baidu.svg  baidu-color.svg
+bfl.svg  bfl.svg
+bytedance.svg  bytedance-color.svg
+cohere.svg  cohere-color.svg
+deepseek.svg  deepseek-color.svg
+google.svg  google-color.svg
+ibm.svg  ibm-color.svg
+kling.svg  kling-color.svg
+meta.svg  meta-color.svg
+microsoft.svg  microsoft-color.svg
+midjourney.svg  midjourney.svg
+minimax.svg  minimax-color.svg
+mistral.svg  mistral-color.svg
+moonshot.svg  moonshot.svg
+nvidia.svg  nvidia-color.svg
+openai.svg  openai.svg
+perplexity.svg  perplexity-color.svg
+runway.svg  runway.svg
+sensenova.svg  sensenova-color.svg
+spark.svg  spark-color.svg
+stability.svg  stability-color.svg
+stepfun.svg  stepfun-color.svg
+suno.svg  suno.svg
+tencent.svg  tencent-color.svg
+xai.svg  xai.svg
+xiaomi.svg  xiaomimimo.svg
+yi.svg  yi-color.svg
+zhipu.svg  zhipu-color.svg
+
+MIT License
+
+Copyright (c) 2023 LobeHub
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

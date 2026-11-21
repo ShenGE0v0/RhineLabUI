@@ -118,6 +118,6 @@
   margin: 12px 0 18px;
 }
 .quality-settings :is(select, input, summary):focus-visible {
-  outline: 2px solid #a67d48;
+  outline: 2px solid #9a7b55;
   outline-offset: 4px;
 }

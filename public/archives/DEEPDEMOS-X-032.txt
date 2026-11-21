@@ -1,0 +1,16 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-032 / 四冲程内燃机机械连杆与热力工作循环仿真
+未标注
+
+平台：未标注
+收录日期：2026-08-19
+作者：HWDyzzZ
+类型：WEB
+
+活塞往复运动、曲轴连杆机构与进气/压缩/做功/排气四冲程指示图动态联动。
+
+作品记录
+1. 题材：仿真
+
+来源：https://deepdemos.top/demo/demo-8d062fdf
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

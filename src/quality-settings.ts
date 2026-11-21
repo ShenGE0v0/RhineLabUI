@@ -7,6 +7,22 @@ import {
 import { isWallpaper } from "./wallpaper";
 import { escapeHtml } from "./html";
 
+/** Cycle payloads are authored here; parse defensively so a stale node cannot throw. */
+function readChoices(button: HTMLElement): [string | number, string][] {
+  try {
+    const value: unknown = JSON.parse(button.dataset.qualityChoices ?? "[]");
+    if (!Array.isArray(value)) return [];
+    return value.filter(
+      (entry): entry is [string | number, string] =>
+        Array.isArray(entry) &&
+        entry.length >= 2 &&
+        (typeof entry[0] === "string" || typeof entry[0] === "number") &&
+        typeof entry[1] === "string",
+    );
+  } catch {
+    return [];
+  }
+}
 function choiceControl(attributes: string, label: string, value: string | number, choices: (readonly [string | number, string])[]) {
   if (isWallpaper) {
     const text = choices.find(([key]) => key === value)?.[1] ?? "自定义";
@@ -18,7 +34,8 @@ function choiceControl(attributes: string, label: string, value: string | number
 if (isWallpaper) document.addEventListener("click", event => {
   const button = (event.target as Element).closest<HTMLButtonElement>("[data-quality-choices]");
   if (!button || button.disabled) return;
-  const choices = JSON.parse(button.dataset.qualityChoices!) as [string | number, string][];
+  const choices = readChoices(button);
+  if (!choices.length) return;
   const index = choices.findIndex(([value]) => String(value) === button.value);
   const [value, label] = choices[(index + 1) % choices.length];
   button.value = String(value);
@@ -50,7 +67,19 @@ export function qualityMarkup(quality: RenderQuality) {
   return `<section class="quality-settings" aria-label="画质设置">
     <div class="quality-heading"><h3>RENDER QUALITY <span>渲染画质</span></h3>${choiceControl('id="quality-preset"', "画质预设", preset, (Object.keys(presetLabels) as QualityPreset[]).map(key => [key, presetLabels[key]]))}</div>
     <p class="quality-summary" id="quality-summary" aria-live="polite"></p>
-    <details class="quality-advanced"><summary>精细设置 <span>清晰度 / 材质 / 阴影</span></summary><div class="quality-grid">
+    <details class="quality-advanced"><summary>精细设置 <span>帧率 / 清晰度 / 材质 / 阴影</span></summary><div class="quality-grid">
+    ${select(
+      quality,
+      "frameRate",
+      "帧率上限",
+      "限制渲染帧率是降低 GPU 占用与发热最直接的方式；静止时自动降到 30",
+      [
+        [30, "30 fps"],
+        [60, "60 fps"],
+        [120, "120 fps"],
+        [0, "不限制"],
+      ],
+    )}
     ${range(quality, "scale", "渲染比例", "相对屏幕像素，受密度上限限制；高比例改善细线", 50, 200)}
     ${select(
       quality,
@@ -136,8 +165,12 @@ export function syncQualityUI(quality: RenderQuality) {
       control.disabled = key === "aoResolution" && quality.aoSamples === 0;
     });
   document.querySelectorAll<HTMLButtonElement>("[data-quality-choices]").forEach(button => {
-    const choices = JSON.parse(button.dataset.qualityChoices!) as [string | number, string][];
-    button.querySelector("[data-quality-label]")!.textContent = choices.find(([value]) => String(value) === button.value)?.[1] ?? "自定义";
+    const choices = readChoices(button);
+    const label = button.querySelector("[data-quality-label]");
+    if (label)
+      label.textContent =
+        choices.find(([value]) => String(value) === button.value)?.[1] ??
+        "自定义";
   });
   document
     .querySelectorAll<HTMLOutputElement>("[data-quality-output]")

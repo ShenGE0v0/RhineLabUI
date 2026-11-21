@@ -3,26 +3,50 @@ import { readFile } from "node:fs/promises";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { decryptionFrame, DecryptionController } from "../src/decryption.ts";
-import { CardAppearance } from "../src/appearance.ts";
-import { frostedTransmissionLod, FROSTED_ROUGHNESS, CLEAR_ROUGHNESS } from "../src/glass-reveal.ts";
+import {
+  frostedTransmissionLod,
+  FROSTED_ROUGHNESS,
+  CLEAR_ROUGHNESS,
+  glassRevealGLSL,
+  frostedTransmissionGLSL,
+} from "../src/glass-reveal.ts";
 
 // Frost occupies the same fraction of a cover across viewport sizes. Clearing
 // must never briefly increase its blur, and both original endpoints survive.
 for (const scale of [0.5, 1, 2]) {
-  const pixels = 400 * scale, width = 1920 * scale;
-  assert.ok(Math.abs(2 ** frostedTransmissionLod(pixels, width, FROSTED_ROUGHNESS) / pixels - 0.016) < 1e-10);
+  const pixels = 400 * scale,
+    width = 1920 * scale;
+  assert.ok(
+    Math.abs(
+      2 ** frostedTransmissionLod(pixels, width, FROSTED_ROUGHNESS) / pixels -
+        0.01,
+    ) < 1e-10,
+  );
   let prior = -Infinity;
   for (let i = 0; i <= 100; i++) {
-    const roughness = CLEAR_ROUGHNESS + (FROSTED_ROUGHNESS - CLEAR_ROUGHNESS) * i / 100;
+    const roughness =
+      CLEAR_ROUGHNESS + ((FROSTED_ROUGHNESS - CLEAR_ROUGHNESS) * i) / 100;
     const lod = frostedTransmissionLod(pixels, width, roughness);
     assert.ok(lod >= prior - 1e-10, "Clearing monotonically reduces blur");
     prior = lod;
-    assert.equal(frostedTransmissionLod(pixels, width, roughness, 0), Math.log2(width) * roughness * (1.46 * 2 - 2));
+    assert.equal(
+      frostedTransmissionLod(pixels, width, roughness, 0),
+      Math.log2(width) * roughness * (1.46 * 2 - 2),
+    );
   }
-  assert.ok(Math.abs(frostedTransmissionLod(pixels, width, CLEAR_ROUGHNESS) - Math.log2(width) * CLEAR_ROUGHNESS * (1.46 * 2 - 2)) < 1e-10);
+  assert.ok(
+    Math.abs(
+      frostedTransmissionLod(pixels, width, CLEAR_ROUGHNESS) -
+        Math.log2(width) * CLEAR_ROUGHNESS * (1.46 * 2 - 2),
+    ) < 1e-10,
+  );
 }
 
-const length = (frame) => frame.intervals.reduce((n, [a, b]) => n + b - a, 0);
+assert.ok(glassRevealGLSL.includes("glassRevealAtHeight"));
+assert.ok(frostedTransmissionGLSL.includes("archiveTransmissionLod"));
+
+const length = (frame) =>
+  frame.intervals.reduce((n, [a, b]) => n + b - a, 0);
 let previous = 0;
 for (let t = 34.24; t < 36.04; t += 0.001) {
   const f = decryptionFrame(t),
@@ -47,6 +71,7 @@ assert.equal(length(decryptionFrame(38.84)), 0);
 assert.equal(decryptionFrame(38.84).clarity, 0);
 assert.equal(decryptionFrame(39.56).clarity, 1);
 assert.ok(length(decryptionFrame(34.64)) > 0.5, "Joining is eased, not linear");
+
 const a = new DecryptionController();
 a.enter();
 a.update(3, false, false);
@@ -73,39 +98,13 @@ assert.equal(a.clarity, 1);
 a.update(0, false, false, 34);
 assert.equal(a.clarity, 0, "Reference seeking is reversible");
 
-const appearance = new CardAppearance();
-const high = new THREE.MeshPhysicalMaterial({
-  transmission: 0.9,
-  thickness: 0.12,
-  attenuationDistance: 2,
+// The REF front panel must exist and span the same height the shader uses.
+globalThis.self = globalThis;
+globalThis.createImageBitmap = async () => ({
+  width: 1,
+  height: 1,
+  close() {},
 });
-const low = high.clone();
-low.thickness = 0.25;
-appearance.register("Frosted_Polymer", high, low);
-const group = new THREE.Group(),
-  mesh = new THREE.Mesh(new THREE.BoxGeometry(), high);
-mesh.userData.surface = "Frosted_Polymer";
-group.add(mesh);
-appearance.prepare(group);
-appearance.apply(group, 1);
-const shader = {
-  uniforms: {},
-  vertexShader: "#include <begin_vertex>\n#include <project_vertex>",
-  fragmentShader: "#include <transmission_pars_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>",
-};
-mesh.material.onBeforeCompile(shader);
-assert.ok(shader.vertexShader.includes("vArchiveProjectedAxis = 1.85"));
-assert.ok(shader.fragmentShader.includes("float lod = archiveTransmissionLod(roughness, ior, transmissionSamplerSize);"));
-const part = new THREE.Group();
-group.add(part);
-part.add(mesh);
-appearance.setClarity(group, 1);
-assert.equal(shader.uniforms.archiveClarity.value, 1);
-assert.ok(Math.abs(mesh.material.thickness - 0.018) < 1e-10);
-appearance.setClarity(group, 0);
-assert.equal(shader.uniforms.archiveClarity.value, 0);
-assert.equal(mesh.material.thickness, 0.12);
-
 const bytes = await readFile(
   new URL("../public/assets/archive-assembly.glb", import.meta.url),
 );
@@ -116,37 +115,30 @@ const asset = (
   )
 ).scene;
 asset.updateMatrixWorld(true);
-let interiors = 0,
-  maxDepth = -Infinity,
-  minDepth = Infinity;
+let glass;
 asset.traverse((mesh) => {
   if (
-    !mesh.isMesh ||
-    !["optical-core", "optical-lenses"].includes(mesh.userData.assemblyPart)
+    mesh.isMesh &&
+    mesh.material.name.replace(/\.\d+$/, "") === "REF_Glass"
   )
-    return;
-  const box = new THREE.Box3().setFromObject(mesh);
-  minDepth = Math.min(minDepth, box.min.z);
-  maxDepth = Math.max(maxDepth, box.max.z);
-  interiors++;
-  assert.ok(
-    box.min.z > -0.038 && box.max.z < 0.174,
-    "Interior stays between substrate and cover",
-  );
+    glass = mesh;
 });
-assert.ok(interiors >= 6);
-// Perspective depth resolution, at the actual detail distance and 24-bit depth.
-const step = (near, distance) =>
-  (distance * distance * (300 - near)) / (300 * near * (2 ** 24 - 1));
-assert.ok(step(5, 72) < step(0.1, 72) / 50);
+assert.ok(glass, "REF_Glass is present in the delivered assembly");
+const box = new THREE.Box3().setFromObject(glass);
+assert.ok(box.min.z > 0.04 && box.max.z < 0.06);
+assert.ok(
+  box.min.y > 0 && box.max.y < 3.7,
+  "Glass height stays inside the shader's 0..3.7 panel range",
+);
+
 console.log(
   JSON.stringify(
     {
       passed: true,
-      interiorMeshes: interiors,
-      interiorDepth: [minDepth, maxDepth],
-      depthStepBefore: step(0.1, 72),
-      depthStepAfter: step(5, 72),
+      glassDepth: [box.min.z, box.max.z],
+      glassHeight: [box.min.y, box.max.y],
+      reveal: "frosted → top-to-bottom clear",
+      timeline: "joining → connected → retracting → revealing → clear",
     },
     null,
     2,

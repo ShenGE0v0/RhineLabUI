@@ -15,7 +15,7 @@
 .wallpaper-background { position: absolute; inset: 0; opacity: 0; pointer-events: none; overflow: hidden; transition: opacity 650ms ease; }
 .wallpaper-background img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: opacity 650ms ease; }
 .wallpaper-background[data-reduced="true"] img { transition: none; }
-#stage:is([data-three-state="closing"], [data-three-state="off"], [data-three-state="loading"]) :is(.relay-entry, [data-action="model-viewer"], .inspection-overlay, .object-caption, #inspection-marks, #inspection-text, #hover-label) { visibility: hidden; pointer-events: none; }
+#stage:is([data-three-state="closing"], [data-three-state="off"], [data-three-state="loading"]) :is(.relay-entry, [data-action="model-viewer"], .inspection-overlay, .object-caption, #inspection-marks, #hover-label) { visibility: hidden; pointer-events: none; }
 #stage:is([data-three-state="closing"], [data-three-state="loading"]) #three-scene { pointer-events: none; }
 [data-ui-frost="true"] .frost-surface { isolation: isolate; }
 .wb-time, .wb-today, .relay-heading, .relay-actions { position: relative; }
@@ -32,7 +32,7 @@
 }
 [data-ui-frost="true"] .frost-surface::after {
   opacity: 1;
-  background: rgba(var(--theme-paper-rgb, 234, 229, 225), var(--frost-tint, .35));
+  background: rgba(var(--theme-paper-rgb, 235, 243, 239), var(--frost-tint, .35));
   -webkit-backdrop-filter: blur(var(--frost-blur, 13px)) saturate(.8);
   backdrop-filter: blur(var(--frost-blur, 13px)) saturate(.8);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 1px 0 rgba(0,0,0,.08);

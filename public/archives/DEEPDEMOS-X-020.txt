@@ -1,0 +1,17 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-020 / 霓虹节奏工作台 · 网页音序器
+GLM5.3FLASH
+
+平台：Zcode
+收录日期：2026-09-05
+作者：public
+类型：WEB
+
+纯 Web Audio 实时合成的 16 步 × 6 轨步进音序器：底鼓、军鼓、踩镲、拍手、贝斯、主奏全部由振荡器与噪声合成，无任何采样。贝斯与主奏为旋律轨，逐格点击循环切换 C 小调五声音阶音名；内置合成波、嘻哈、浩室、随机四套预设，BPM 与摇摆可调，顶部实时频谱可视化，零依赖单文件。
+
+作品记录
+1. 生成模型：GLM5.3FLASH
+2. 使用平台：Zcode
+
+来源：https://deepdemos.top/demo/demo-86d62c47
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

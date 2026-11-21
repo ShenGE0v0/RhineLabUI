@@ -67,7 +67,6 @@ export class WallpaperEffects {
       }
       this.projection.invalidate();
     }
-    const active = this.stage.dataset.mode !== "boot";
     const moving = options.parallax && options.tracking && pointerParallax && !this.stage.querySelector("#modal-root")?.childElementCount;
     const dt = this.last ? Math.min(.1, Math.max(0, time - this.last)) : 0;
     this.last = time;
@@ -78,7 +77,7 @@ export class WallpaperEffects {
     this.depth += ((options.parallax ? options.depth : 0) - this.depth) * blend;
     this.projection.update(this.depth, this.current);
     this.stage.dataset.hudTracking = String(moving);
-    this.stage.dataset.uiFrost = String(active && options.frost && options.frostStrength > 0);
+    this.stage.dataset.uiFrost = String(options.frost && options.frostStrength > 0);
     this.stage.style.setProperty("--frost-blur", `${options.frostStrength * 24}px`);
     this.stage.style.setProperty("--frost-tint", String(options.frostStrength * .65));
     const scene = this.scene();

@@ -25,7 +25,7 @@ const browser=await chromium.launch({channel,headless:true,args:['--use-angle=d3
 const report={channel,version:browser.version(),release:metadata.version,checks:[],errors:[]};
 try {
  const context=await browser.newContext({viewport:{width:1440,height:900}});
- await context.addInitScript(()=>{if(!localStorage.getItem('rhine-settings'))localStorage.setItem('rhine-settings',JSON.stringify({reduced:true,sound:false,music:false}))});
+ await context.addInitScript(()=>{if(!localStorage.getItem('rhine-settings'))localStorage.setItem('rhine-settings',JSON.stringify({reduced:true,music:false}))});
  const page=await context.newPage();page.on('pageerror',e=>report.errors.push(e.message));
  const ready=()=>page.waitForFunction(()=>window.rhine?.stats().ready&&document.documentElement.dataset.offlineReady==='true'&&navigator.serviceWorker.controller&&!document.querySelector('#loading'),null,{timeout:90000});
  const base='http://127.0.0.1:5192/';

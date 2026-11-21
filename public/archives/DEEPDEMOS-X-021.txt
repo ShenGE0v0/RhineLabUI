@@ -1,0 +1,17 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-021 / ASMR 触发音模拟器 · 3D 声场实验室
+V4.1FLASH0908
+
+平台：DSH
+收录日期：2026-09-08
+作者：public
+类型：WEB
+
+3D 声场触发音模拟器：在三维空间摆放声源，实时合成 ASMR 触发音，支持空间音频与交互控制。纯前端单文件，双击即可离线运行。
+
+作品记录
+1. 生成模型：V4.1FLASH0908
+2. 使用平台：DSH
+
+来源：https://deepdemos.top/demo/asmr-3d-95a655f8
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

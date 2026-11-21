@@ -1,5 +1,12 @@
 import content from "../content/archives.json" with { type: "json" };
 
+export interface ArchiveCardStats {
+  sample?: string;
+  views?: number;
+  downloads?: number;
+  comments?: number;
+}
+
 export interface ArchiveRecord {
   id: string;
   title: string;
@@ -12,10 +19,12 @@ export interface ArchiveRecord {
   abstract: string;
   findings: string[];
   source: string;
+  cover?: string;
+  stats?: ArchiveCardStats;
 }
 
 export const records: ArchiveRecord[] = content.records;
-export const categories = ["全部档案", ...content.categories];
+export const categories = ["全部作品", ...content.categories];
 export const archiveColumns = content.columns;
 
 export function columnFiles(lane: number) {

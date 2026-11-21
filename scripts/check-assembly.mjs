@@ -3,6 +3,16 @@ import { readFile } from "node:fs/promises";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { damp } from "../src/motion.ts";
+
+// The delivered REF asset embeds its card texture. Node has no DOM image
+// decoder, but the assembly checks only need geometry, so a 1×1 bitmap stub is
+// enough to let GLTFLoader finish parsing the material.
+globalThis.self = globalThis;
+globalThis.createImageBitmap = async () => ({
+  width: 1,
+  height: 1,
+  close() {},
+});
 async function load(name) {
   const b = await readFile(
     new URL("../public/assets/" + name, import.meta.url),
@@ -19,6 +29,7 @@ const [original, assembly] = await Promise.all([
   load("archive-assembly.glb"),
 ]);
 const parts = new Map();
+const surfaces = new Set();
 const vertices = (scene, collect = false) => {
   const points = new Map();
   scene.updateMatrixWorld(true);
@@ -26,6 +37,7 @@ const vertices = (scene, collect = false) => {
     if (!mesh.isMesh) return;
     const surface = mesh.material.name.replace(/\.\d+$/, "");
     if (surface === "Carbon_Ink") return;
+    surfaces.add(surface);
     if (collect) {
       assert.ok(
         mesh.userData.assemblyPart,
@@ -48,14 +60,14 @@ const vertices = (scene, collect = false) => {
 };
 const a = vertices(original),
   b = vertices(assembly, true);
-assert.deepEqual([...parts.keys()].sort(), [
-  "carrier",
-  "cover",
-  "fasteners",
-  "optical-core",
-  "optical-lenses",
-  "substrate",
-]);
+assert.deepEqual([...parts.keys()].sort(), ["body", "card"]);
+assert.ok(parts.get("body") >= 9, "REF body keeps its frame, shell and glass");
+assert.ok(parts.get("card") >= 1, "REF card print is present");
+assert.ok(surfaces.has("REF_Glass"), "REF front glass is present");
+assert.ok(surfaces.has("REF_CardPrint"), "REF printed card is present");
+assert.ok(surfaces.has("REF_BackPlate"), "REF rear backing plate is present");
+assert.ok(surfaces.has("REF_PanelWhite"), "REF front backing panel is present");
+assert.ok(!surfaces.has("REF_shadow_catcher"), "Render-only shadow catcher is not shipped");
 // Compare actual distances: rounding to a fixed grid can split equivalent
 // float32 coordinates on either side of a rounding boundary after Blender joins.
 function maxVertexError(from, to) {
@@ -82,7 +94,18 @@ assert.ok(
 const height = new THREE.Box3()
   .setFromObject(assembly)
   .getSize(new THREE.Vector3()).y;
-assert.ok(Math.abs(height - 3.7) < 1e-5);
+assert.ok(Math.abs(height - 3.7066) < 1e-3);
+const assembledBox = new THREE.Box3().setFromObject(assembly);
+const assembledSize = assembledBox.getSize(new THREE.Vector3());
+assert.ok(Math.abs(assembledSize.x - 5.004) < 1e-3);
+// The single paper strip folds over both rims of the 0.10-deep case.
+assert.ok(Math.abs(assembledSize.z - 0.1033) < 1e-3);
+const centerX = (assembledBox.min.x + assembledBox.max.x) / 2;
+assert.ok(Math.abs(centerX + 4.5) < 1e-3, "REF source keeps its left-side origin");
+assert.ok(
+  Math.abs(assembledBox.min.y) < 0.003,
+  "REF source sits within the authored 2 mm base tolerance",
+);
 // Interrupted motion retains position and velocity, then converges exactly enough
 // for the viewer to snap to the original assembly pose.
 const spread = { value: 0, velocity: 0 };

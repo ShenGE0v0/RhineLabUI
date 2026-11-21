@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  archiveWave,
-  extraction,
   selectionWave,
   baselineSelectionWave,
   rippleEnvelope,
@@ -42,29 +40,6 @@ for (let lane = 0; lane < 5; lane++) {
 }
 assert.ok(idleRange > 0.075, "Idle field remains perceptible without input");
 
-const peak = (t) =>
-  Array.from({ length: 32 }, (_, row) => archiveWave(row, 2, t)).reduce(
-    (best, y, row, values) => (y > values[best] ? row : best),
-    0,
-  );
-assert.ok(peak(23.3) > peak(22.7) + 6, "First crest must travel across rows");
-assert.ok(peak(24.8) < peak(24.2) - 8, "Second crest must return across rows");
-let maxFrameDelta = 0;
-for (let frame = 550; frame < 800; frame++) {
-  for (let row = 0; row < 32; row++)
-    for (let lane = 0; lane < 5; lane++) {
-      const a = archiveWave(row, lane, frame / 25);
-      const b = archiveWave(row, lane, (frame + 1) / 25);
-      assert.ok(Number.isFinite(a));
-      maxFrameDelta = Math.max(maxFrameDelta, Math.abs(b - a));
-    }
-}
-assert.ok(maxFrameDelta < 0.7, "25 fps samples must not teleport");
-assert.ok(
-  Math.abs(extraction(26.6) - extraction(27.2)) < 0.01,
-  "Pause between extraction phases",
-);
-assert.ok(extraction(29) > 3 && extraction(25.1) === 0);
 assert.ok(
   Math.abs(settlingWave(2, 26.1) - settlingWave(2, 26.5)) > 0.01,
   "Neighbors keep moving during the first extraction hold",
@@ -136,9 +111,6 @@ assert.ok(
 console.log(
   JSON.stringify(
     {
-      forwardPeaks: [peak(22.7), peak(23.3)],
-      returnPeaks: [peak(24.2), peak(24.8)],
-      maxFrameDelta,
       checks: "passed",
     },
     null,

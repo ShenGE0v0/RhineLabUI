@@ -218,7 +218,7 @@ try {
   await wait(1800);
   await click('[data-action="search"]');
   await wait(400);
-  await page.locator("#archive-search").fill("莱茵");
+  await page.locator("#archive-search").fill("重构");
   await wait(500);
   await shot("search");
   await page.keyboard.press("Escape");
@@ -228,12 +228,6 @@ try {
   await shot("settings");
   await page.keyboard.press("Escape");
   await wait(350);
-  await record("boot-motion", async () => {
-    await click('[data-action="replay"]');
-    await wait(6500);
-    await shot("boot");
-    await wait(13000);
-  });
   manifest.stats = await page.evaluate(() => window.rhine.stats());
   await writeFile(
     resolve(temporary, "manifest.json"),

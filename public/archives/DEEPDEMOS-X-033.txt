@@ -1,0 +1,16 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-033 / CS FPS
+HY4
+
+平台：未标注
+收录日期：2026-08-29
+作者：GOD
+类型：WEB
+
+浏览器枪战原型，也能当快速开发 FPS 的底座。特训、团队死斗、爆破、靶场都能打。买枪、手雷、仓库枪皮都有。电脑键鼠和手机虚拟摇杆都能玩。后面还会更。 出站 AI：Grok · Hy4
+
+作品记录
+1. 生成模型：HY4
+
+来源：https://deepdemos.top/demo/cs-fps-40c092a9
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

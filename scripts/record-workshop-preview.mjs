@@ -9,7 +9,7 @@ try {
  await page.goto('http://127.0.0.1:5176/?scene=archive');
  await page.waitForFunction(()=>window.rhine?.stats().ready);
  const apply=values=>page.evaluate(values=>window.wallpaperPropertyListener.applyUserProperties(Object.fromEntries(Object.entries(values).map(([k,value])=>[k,{value}]))),values);
- await apply({desktopmode:'workbench',boot:false,renderquality:'original',superperformance:false,sound:false,music:false,reduced:false,colortheme:'light',hudparallax:true,huddepth:20,hudtracking:false,screenfinish:false,uifrost:true,audioreactive:true,selectionstyle:'music-flat',rhythmstyle:'legacy',task1:'整理今日记录',task2:'阅读与学习',task3:'留一点时间休息'});
+ await apply({desktopmode:'workbench',boot:false,renderquality:'original',superperformance:false,music:false,reduced:false,colortheme:'light',hudparallax:true,huddepth:20,hudtracking:false,screenfinish:false,uifrost:true,audioreactive:true,selectionstyle:'music-flat',rhythmstyle:'legacy',task1:'整理今日记录',task2:'阅读与学习',task3:'留一点时间休息'});
  await page.waitForTimeout(3500);
  await page.evaluate(()=>{window.previewSpectrum=setInterval(()=>{const t=performance.now()/1000;window.rhineWallpaperSpectrum={time:t,samples:Array.from({length:128},(_,i)=>.02+.065*(.5+.5*Math.sin(t*3-i*.21))*(.5+.5*Math.sin(t*1.7+i*.08)))}},33)});
  const frames=[],start=Date.now();let phase=0;

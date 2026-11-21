@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { COLUMN_SPACING, ROW_SPACING } from "../src/archive-loop.ts";
+import { testScreenshotPath } from "./test-screenshot-path.mjs";
 const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE
     ? pathToFileURL(resolve(process.env.PLAYWRIGHT_MODULE)).href
@@ -96,7 +98,7 @@ try {
         );
         assert.ok(during.dragTrack);
         const track = axis === "lane" ? "columnCamera" : "rail",
-          spacing = axis === "lane" ? 5.2 : -0.62;
+          spacing = axis === "lane" ? COLUMN_SPACING : -ROW_SPACING;
         assert.ok(
           Math.abs((during[track] - captured[track]) / spacing - amount) < 0.04,
           "Projected travel follows the requested physical distance",
@@ -132,8 +134,8 @@ try {
       await move(x + dx, y + dy);
       await page.waitForTimeout(100);
       const state = await stats(page);
-      const lane = (state.columnCamera - anchor.columnCamera) / 5.2;
-      const row = (state.rail - anchor.rail) / -0.62;
+      const lane = (state.columnCamera - anchor.columnCamera) / COLUMN_SPACING;
+      const row = (state.rail - anchor.rail) / -ROW_SPACING;
       assert.ok(
         Math.abs(lane * basis.lane.x + row * basis.row.x - dx) < 2,
         "Screen X follows the pointer",
@@ -189,7 +191,7 @@ try {
       });
     }
     await page.screenshot({
-      path: resolve(`.tools/array-input/diagonal-${width}x${height}.png`),
+      path: testScreenshotPath("array-input", `diagonal-${width}x${height}.png`),
     });
     assert.deepEqual(errors, []);
     report.push({ width, height, mobile, results, checks: "passed" });

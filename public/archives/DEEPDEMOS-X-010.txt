@@ -1,0 +1,17 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-010 / 潇湘馆（红楼梦）Three.js 还原
+FABLE5.1
+
+平台：未标注
+收录日期：2026-09-10
+作者：public
+类型：WEB
+
+Three.js 实时还原《红楼梦》潇湘馆。俯瞰可见粉墙院落、正房三间黛瓦、后院退步与连廊，竹林遮映房舍，墙外溪流与翠烟桥。右侧可切换 9 处视点、调节时辰与天气，并有一册题着《红楼梦》原文的说明卡，解释布局依据（退步与正房的垂直关系、水渠走向等）。
+
+作品记录
+1. 生成模型：FABLE5.1
+2. 题材：3D建模
+
+来源：https://deepdemos.top/demo/claude-fable-5-1-three-js-2da3c8a8
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { testScreenshotPath } from "./test-screenshot-path.mjs";
+import { COLUMN_SPACING } from "../src/archive-loop.ts";
 const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE
     ? pathToFileURL(resolve(process.env.PLAYWRIGHT_MODULE)).href
@@ -112,7 +114,7 @@ try {
       "Selection changes before release",
     );
     await page.screenshot({
-      path: resolve(output, `${mobile ? "touch" : "mouse"}-drag.png`),
+      path: testScreenshotPath("array-input", `${mobile ? "touch" : "mouse"}-drag.png`),
     });
     await up();
     await settle(page);
@@ -120,7 +122,7 @@ try {
     assert.equal(lane.selectedCell.lane, start.selectedCell.lane + 1);
     assert.equal(lane.dragTrack, null);
     assert.ok(
-      Math.abs(lane.columnCamera - (lane.selectedCell.lane - 2) * 5.2) < 0.03,
+      Math.abs(lane.columnCamera - (lane.selectedCell.lane - 2) * COLUMN_SPACING) < 0.03,
     );
     await down(x, y);
     await move(x + 2, y - rowStep * 0.8);
@@ -169,7 +171,9 @@ try {
         0.4,
         "Hover does not change extraction or camera progress",
       );
-      await page.screenshot({ path: resolve(output, "mouse-hover.png") });
+      await page.screenshot({
+        path: testScreenshotPath("array-input", "mouse-hover.png"),
+      });
       await page.mouse.down();
       await page.mouse.up();
       assert.deepEqual(

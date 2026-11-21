@@ -26,7 +26,7 @@ gl.bufferSubData = ((...args: any[]) => {
   uploadBytes += args[4] ? args[4] * (args[2].BYTES_PER_ELEMENT || 1) : args[2].byteLength;
   return (bufferSubData as any)(...args);
 }) as any;
-const step = (cinema?: any) => { time += 1 / 60; scene.update(time, cinema); };
+const step = () => { time += 1 / 60; scene.update(time); };
 Object.assign(window, { bench: {
   scene,
   async prepare(name: string, options: any = {}) {
@@ -56,7 +56,7 @@ Object.assign(window, { bench: {
       uploads = uploadBytes = 0;
       if (query) gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
       const start = performance.now();
-      step(name === 'opening' ? {time:22 + i/60,reveal:1,lift:0,zoom:0} : undefined);
+      step();
       const cpu = performance.now() - start;
       if (query) gl.endQuery(ext.TIME_ELAPSED_EXT);
       gl.finish();

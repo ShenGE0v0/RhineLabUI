@@ -1,0 +1,18 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-003 / 蒙娜丽莎 · SVG 油画复原
+V4.1FLASH0908
+
+平台：DSH
+收录日期：2026-09-08
+作者：public
+类型：WEB
+
+手写矢量油画复原达·芬奇《蒙娜丽莎》：画布 530×770，全部由 SVG 路径、渐变与滤镜构成，无位图、无外部依赖。坐标来自对原作实测，程序化龟裂生成器做旧。浏览器直接打开。
+
+作品记录
+1. 生成模型：V4.1FLASH0908
+2. 使用平台：DSH
+3. 题材：动画
+
+来源：https://deepdemos.top/demo/svg-7ee98da1
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

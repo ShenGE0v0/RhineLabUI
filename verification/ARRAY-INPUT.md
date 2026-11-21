@@ -28,4 +28,4 @@
 - Windows Playwright WebKit 的 390×844 竖屏完整回归通过；使用合成 PointerEvent，不代表 iPhone 真机多指行为。初次开发服务器运行在查看器步骤超时，改用固定生产构建后完整通过。
 - `scripts/check-loop.mjs`：20,000 次相邻循环导航；`npm run check:viewport`：视口与原片构图；`npm run build`：TypeScript、资源与 PWA 构建。
 
-本地截图和报告在 `.tools/array-input/`、`.tools/responsive/`。手机触摸验证属于桌面浏览器模拟，没有新增 iPhone 真机测试数据。
+本地截图保存到项目同级的 `../RhineLabUI-screenshots/`，按 `array-input/`、`responsive/` 归类。报告仍保存在仓库内的 `.tools/array-input/` 和 `.tools/responsive/`。手机触摸验证属于桌面浏览器模拟，没有新增 iPhone 真机测试数据。

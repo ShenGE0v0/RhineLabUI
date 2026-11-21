@@ -12,7 +12,6 @@ await page.addInitScript(() => {
   localStorage.setItem(
     "rhine-settings",
     JSON.stringify({
-      sound: false,
       music: false,
       reduced: true,
       superPerformance: true,

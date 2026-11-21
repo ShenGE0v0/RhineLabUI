@@ -14,6 +14,11 @@
   display: flex;
   border: 1px solid #bcb6ac;
 }
+/* 模型没有半透明盖板时隐藏开关。类选择器的 display 会盖掉 [hidden] 的 UA 默认值，
+   必须显式补一条，否则会留下两个点了没反应的按钮。 */
+.viewer-surface[hidden] {
+  display: none;
+}
 .viewer-surface button {
   padding: 10px 22px;
   font-size: 14px;

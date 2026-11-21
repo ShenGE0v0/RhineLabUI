@@ -1,6 +1,8 @@
 /** Rendering controls are independent of lighting, materials and animation. */
 export type RenderQuality = {
   scale: number;
+  /** Target render rate. 0 leaves the display refresh rate uncapped. */
+  frameRate: number;
   pixelRatio: number;
   antialias: "off" | "smaa";
   shadows: number;
@@ -14,6 +16,7 @@ export type RenderQuality = {
 export const qualityPresets = {
   performance: {
     scale: 80,
+    frameRate: 30,
     pixelRatio: 1,
     antialias: "off",
     shadows: 1024,
@@ -25,6 +28,7 @@ export const qualityPresets = {
   },
   original: {
     scale: 100,
+    frameRate: 60,
     pixelRatio: 1.5,
     antialias: "off",
     shadows: 2048,
@@ -36,6 +40,7 @@ export const qualityPresets = {
   },
   high: {
     scale: 125,
+    frameRate: 60,
     pixelRatio: 2,
     antialias: "smaa",
     shadows: 4096,
@@ -47,6 +52,7 @@ export const qualityPresets = {
   },
   ultra: {
     scale: 150,
+    frameRate: 60,
     pixelRatio: 2,
     antialias: "smaa",
     shadows: 4096,
@@ -93,6 +99,7 @@ export function normalizeQuality(
     : { ...base, pixelRatio: 1, aoSamples: 0, depthOfField: 0 };
   return {
     scale: range(v.scale, 50, 200, 5, fallback.scale),
+    frameRate: member(v.frameRate, [0, 30, 60, 120], fallback.frameRate),
     pixelRatio: member(v.pixelRatio, [1, 1.5, 2, 3], fallback.pixelRatio),
     antialias: member(
       v.antialias,

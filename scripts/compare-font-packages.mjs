@@ -4,6 +4,7 @@ import { readFile, writeFile, stat, mkdir } from 'node:fs/promises';
 import { resolve, dirname, extname, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
+import { testScreenshotPath } from './test-screenshot-path.mjs';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(resolve(process.env.PLAYWRIGHT_MODULE)).href : 'playwright');
 const root = resolve('.'), output = resolve('.tools/font-comparison');
 const weights = [[300,'Light'],[400,'Regular'],[600,'Demibold'],[700,'Bold']];
@@ -73,7 +74,7 @@ try {
       });
     });
   },{packages,weights,corpus,sample});
-  await page.screenshot({path:resolve(output,'comparison.png'),fullPage:true});
+  await page.screenshot({path:testScreenshotPath('font-comparison','comparison.png'),fullPage:true});
 } finally { await browser.close();await new Promise(r=>server.close(r)); }
 await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));
 console.log(JSON.stringify(report,null,2));

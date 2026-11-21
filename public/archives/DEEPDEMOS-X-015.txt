@@ -1,0 +1,19 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-015 / 博丽神社 · DS4.1f + ZCode版本
+V4.1FLASH
+
+平台：Zcode
+收录日期：2026-09-12
+作者：sallyn0225
+类型：WEB
+
+由 ZCode + DSV4.1f 正式版生成的博丽神社 模型来自Command Code Goat
+
+作品记录
+1. 生成模型：V4.1FLASH
+2. 使用平台：Zcode
+3. 生成轮数：5
+4. 题材：3D建模
+
+来源：https://deepdemos.top/demo/3d-5def8d47
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

@@ -3,15 +3,21 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
+const project = JSON.parse(readFileSync("wallpaper/project.json", "utf8"));
+assert.equal(project.preview, "preview.png");
+assert.equal(project.visibility, "private");
+assert.ok(!Object.hasOwn(project, "workshopid") && !Object.hasOwn(project, "workshopurl"),
+  "The fork's local build must be separate from the upstream workshop item");
+
 const events = [];
 const hostWindow = { dispatchEvent: event => events.push(event) };
 vm.runInNewContext(readFileSync("wallpaper/host.js", "utf8"), {
   window: hostWindow, Event, CustomEvent, location: { protocol: "file:" },
 });
 const listener = hostWindow.wallpaperPropertyListener;
-listener.applyUserProperties({ sound: { value: false } });
+listener.applyUserProperties({ music: { value: true } });
 listener.applyUserProperties({ musicvolume: { value: 15 } });
-assert.equal(hostWindow.rhineWallpaperHost.properties.sound.value, false);
+assert.equal(hostWindow.rhineWallpaperHost.properties.music.value, true);
 assert.equal(hostWindow.rhineWallpaperHost.properties.musicvolume.value, 15);
 assert.equal(events.length, 2, "Early and partial callbacks are retained and dispatched");
 listener.applyGeneralProperties({ fps: 30 });
@@ -46,7 +52,12 @@ const { qualityMarkup } = await import(`data:text/javascript;base64,${Buffer.fro
 const { qualityPresets } = await import(qualityModule);
 const markup = qualityMarkup(qualityPresets.original);
 assert.ok(!markup.includes("<select"), "Wallpaper must not instantiate CEF native select controls");
-assert.equal((markup.match(/data-quality-choices=/g) ?? []).length, 8);
+// One cycle button per quality field, plus the preset itself; derive it so
+// adding a field cannot silently drift out of sync with this guard.
+// One cycle button per dropdown field, plus the preset itself. Slider fields
+// (scale, depthOfField) render as ranges on both builds and are counted apart.
+const dropdownCount = Object.keys(qualityPresets.original).length - 2;
+assert.equal((markup.match(/data-quality-choices=/g) ?? []).length, dropdownCount + 1, "Wallpaper cycles every dropdown quality field");
 const selectedLabel = { textContent: "" };
 const button = { disabled: false, value: "original", dataset: { qualityChoices: JSON.stringify([["original", "原始"], ["high", "高"]]) }, querySelector: () => selectedLabel, dispatchEvent: event => { assert.equal(event.type, "change"); assert.ok(event.bubbles); } };
 documentListeners.click({ target: { closest: () => button } });
@@ -57,5 +68,9 @@ assert.equal(button.value, "original", "All settings wrap to their first option"
 const webModule = `data:text/javascript;base64,${Buffer.from(outputText.replace('"wallpaper" === "wallpaper"', '"production" === "wallpaper"')).toString("base64")}`;
 const webControls = controls.replace(JSON.stringify(wallpaperModule), JSON.stringify(webModule));
 const { qualityMarkup: webQualityMarkup } = await import(`data:text/javascript;base64,${Buffer.from(webControls).toString("base64")}`);
-assert.equal((webQualityMarkup(qualityPresets.original).match(/<select/g) ?? []).length, 8, "Website keeps its native dropdowns");
-console.log("Wallpaper early properties, partial updates, FPS changes, pause/resume and CEF-safe quality controls passed.");
+assert.equal((webQualityMarkup(qualityPresets.original).match(/<select/g) ?? []).length, dropdownCount + 1, "Website keeps its native dropdowns");
+assert.equal(Object.hasOwn(project.general.properties, "sound"), false, "Sound-effect switch is removed");
+assert.equal(Object.hasOwn(project.general.properties, "soundvolume"), false, "Sound-effect volume is removed");
+assert.equal(Object.hasOwn(project.general.properties, "music"), true, "Music switch remains");
+assert.equal(Object.hasOwn(project.general.properties, "musicvolume"), true, "Music volume remains");
+console.log("Wallpaper music properties, legacy sound-field freedom, partial updates, FPS changes, pause/resume and CEF-safe quality controls passed.");

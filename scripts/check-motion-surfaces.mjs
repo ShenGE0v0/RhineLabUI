@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { testScreenshotPath } from './test-screenshot-path.mjs';
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const browser = await chromium.launch({ channel: process.env.REVIEW_CHANNEL || 'msedge', headless: true });
 const errors = [], report = {};
@@ -17,7 +18,7 @@ const closeSettings = async page => {
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' });
   await context.addInitScript(() => localStorage.setItem('rhine-settings', JSON.stringify({
-    sound: false, music: false, superPerformance: true, colorTheme: 'dark',
+    music: false, superPerformance: true, colorTheme: 'dark',
     motion: { boot: false, surfaceTransitions: false, detailTransition: true, modelDecryption: false, documentReveal: false },
   })));
   const page = await context.newPage(); watch(page);
@@ -37,7 +38,7 @@ try {
   });
   assert.ok(report.contrast.every(item => item.ratio >= 4.5), JSON.stringify(report.contrast));
   await mkdir('.tools/motion-surfaces', { recursive: true });
-  await page.locator('.motion-settings-head').screenshot({ path: '.tools/motion-surfaces/dark-controls.png' });
+  await page.locator('.motion-settings-head').screenshot({ path: testScreenshotPath('motion-surfaces', 'dark-controls.png') });
   await closeSettings(page);
   const entry = await page.evaluate(() => {
     window.rhine.detail();
@@ -66,7 +67,7 @@ try {
   await wp.goto(process.env.WALLPAPER_URL || 'http://127.0.0.1:5176');
   await wp.waitForFunction(() => window.rhine?.stats().ready);
   await wp.evaluate(() => window.wallpaperPropertyListener.applyUserProperties({
-    boot: { value: false }, sound: { value: false }, music: { value: false }, reduced: { value: false },
+    boot: { value: false }, music: { value: false }, reduced: { value: false },
     superperformance: { value: true }, desktopmode: { value: 'archive' },
   }));
   await wp.waitForFunction(() => window.rhine.stats().startup === 'started');
@@ -105,7 +106,7 @@ try {
   await wp.waitForFunction(() => document.querySelector('.viewer-canvas').getAnimations().some(a => a.playState === 'running' && a.effect.getTiming().duration === 380));
   const modelOnly = await wp.evaluate(() => {
     // An unrelated host save must not cancel a still-enabled model entry.
-    window.wallpaperPropertyListener.applyUserProperties({ sound: { value: false } });
+    window.wallpaperPropertyListener.applyUserProperties({ archivecoverage: { value: 'standard' } });
     const canvas = document.querySelector('.viewer-canvas');
     const before = canvas.getAnimations().some(a => a.playState === 'running' && a.effect.getTiming().duration === 380);
     window.wallpaperPropertyListener.applyUserProperties({ reduced: { value: true } });

@@ -19,9 +19,10 @@ await new Promise(r=>server.listen(5198,'127.0.0.1',r));
 const browser=await chromium.launch({channel:process.env.REVIEW_CHANNEL||'chrome',headless:true,args:['--use-angle=d3d11','--enable-gpu','--ignore-gpu-blocklist']});
 try {
   const context=await browser.newContext({viewport:{width:1440,height:900}});
-  await context.addInitScript(()=>{if(!localStorage.getItem('rhine-settings'))localStorage.setItem('rhine-settings',JSON.stringify({sound:false,music:false,reduced:true}))});
+  await context.addInitScript(()=>{if(!localStorage.getItem('rhine-settings'))localStorage.setItem('rhine-settings',JSON.stringify({sound:false,soundVolume:0.55,music:false,reduced:true}))});
   const page=await context.newPage();page.on('pageerror',e=>report.errors.push(e.message));
   const ready=()=>page.waitForFunction(()=>window.rhine?.stats().ready&&!document.querySelector('#loading')&&navigator.serviceWorker.controller&&document.documentElement.dataset.offlineReady==='true',null,{timeout:120000});
+  const openArchiveWithKeyboard=async()=>{await page.locator('#three-scene').focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>window.rhine.stats().mode==='detail')};
   await page.goto('http://127.0.0.1:5198/');await ready();
   await page.evaluate(()=>localStorage.setItem('rhine-saved','["X-001","X-009"]'));
   const oldKeys=await page.evaluate(()=>caches.keys());
@@ -33,16 +34,28 @@ try {
   await page.locator('#pwa-update-notice [data-pwa-action="update"]').click();await page.waitForLoadState('load');await ready();
   assert.equal(await page.evaluate(()=>window.rhine.stats().startup),'started');
   assert.equal(await page.evaluate(()=>localStorage.getItem('rhine-saved')),'["X-001","X-009"]');
-  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('rhine-settings')).sound),false);
+  // ready() waits for the replacement release startup, including its savePrefs pass.
+  const migratedPrefs=await page.evaluate(()=>JSON.parse(localStorage.getItem('rhine-settings')));
+  assert.equal(Object.hasOwn(migratedPrefs,'sound'),false,'Legacy sound preference is ignored and not rewritten');
+  assert.equal(Object.hasOwn(migratedPrefs,'soundVolume'),false,'Legacy sound volume is ignored and not rewritten');
+  await openArchiveWithKeyboard();
+  await page.locator('[data-action="settings"]').click();
+  await page.locator('.audio-settings').waitFor();
+  assert.deepEqual(await page.locator('.audio-settings [data-pref]').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('data-pref'))),['music'],'Settings expose only the music toggle');
+  assert.equal(await page.locator('.audio-settings [data-volume="musicVolume"]').count(),1,'Settings expose one music volume control');
+  await page.locator('[data-action="close-modal"]').click();
+  await page.locator('.audio-settings').waitFor({state:'detached'});
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>window.rhine.stats().mode==='archive');
   const newKeys=await page.evaluate(()=>caches.keys());assert.ok(newKeys.some(k=>k.endsWith(metadata.version)));assert.ok(oldKeys.every(k=>!newKeys.includes(k)));
   assert.equal(await page.evaluate(()=>caches.match('/fonts/MiSans-Regular.woff2').then(Boolean)),false);
   report.checks.push('Previous complete release updates atomically; obsolete whole fonts removed; bookmarks and preferences retained');
   // Enable audio only for the next entry, then prove its cached resources work.
-  await page.evaluate(()=>{const p=JSON.parse(localStorage.getItem('rhine-settings'));p.sound=true;p.music=true;localStorage.setItem('rhine-settings',JSON.stringify(p))});
+  await page.evaluate(()=>{const p=JSON.parse(localStorage.getItem('rhine-settings'));p.music=true;localStorage.setItem('rhine-settings',JSON.stringify(p))});
   await context.setOffline(true);await page.reload();await page.waitForFunction(()=>window.rhine?.stats().startup==='waiting');
   await page.locator('.entry-start').click();await ready();
   assert.equal(await page.evaluate(()=>window.rhine.stats().audio.tracks),3);
-  await page.locator('.read-file').click();await page.waitForFunction(()=>window.rhine.stats().decryption.clarity===1);
+  await openArchiveWithKeyboard();await page.waitForFunction(()=>window.rhine.stats().decryption.clarity===1);
   await page.locator('.viewer-open').click();await page.waitForFunction(()=>JSON.parse(document.querySelector('.model-viewer')?.dataset.stats||'{}').ready);
   await page.locator('[data-viewer="explode"]').click();await page.waitForFunction(()=>JSON.parse(document.querySelector('.model-viewer').dataset.stats).spread===1);
   report.checks.push('Updated release enters offline with all three music tracks, split fonts, hashed main/viewer models and explosion');

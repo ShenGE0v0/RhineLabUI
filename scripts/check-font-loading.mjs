@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { testScreenshotPath } from './test-screenshot-path.mjs';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(resolve(process.env.PLAYWRIGHT_MODULE)).href : 'playwright');
 const baseline = resolve(process.env.BASELINE_DIST || '.tools/issues-before');
 const current = resolve('dist');
@@ -37,13 +38,13 @@ try {
       const el=document.querySelector(selector),r=document.createRange();r.selectNodeContents(el);const rect=r.getBoundingClientRect();
       return {selector,text:el.textContent,width:rect.width,height:rect.height,x:rect.x,y:rect.y,font:getComputedStyle(el).font};
     }));
-    await page.screenshot({path:resolve(out,`brand-${name}.png`),clip:{x:45,y:100,width:300,height:135}});
+    await page.screenshot({path:testScreenshotPath('font-loading',`brand-${name}.png`),clip:{x:45,y:100,width:300,height:135}});
     await page.goto(`http://127.0.0.1:${port}/?scene=detail`);
     await page.waitForFunction(()=>window.rhine?.stats().ready&&!document.querySelector('#loading'));
     await page.waitForFunction(()=>window.rhine.stats().decryption.clarity===1);
     await page.evaluate(()=>document.fonts.ready);
     await page.waitForFunction(()=>!document.querySelector('.document-redaction-window'));
-    await page.screenshot({path:resolve(out,`detail-${name}.png`)});
+    await page.screenshot({path:testScreenshotPath('font-loading',`detail-${name}.png`)});
     result.document=await page.locator('.detail-content').evaluate(el=>({width:el.clientWidth,height:el.clientHeight,scrollWidth:el.scrollWidth,scrollHeight:el.scrollHeight}));
     await context.close();
   }

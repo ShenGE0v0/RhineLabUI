@@ -6,8 +6,8 @@ export type ArchiveNavigation =
 
 export const LOOP_COLUMNS = 9;
 export const LOOP_ROWS = 32;
-export const COLUMN_SPACING = 5.2;
-export const ROW_SPACING = 0.62;
+export const COLUMN_SPACING = 5.1;
+export const ROW_SPACING = 0.28;
 const POOL_LANES = [0, 1, 2, 3, 4, -2, -1, 5, 6];
 
 export function wrap(value: number, count: number) {

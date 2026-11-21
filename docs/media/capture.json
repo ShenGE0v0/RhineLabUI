@@ -39,15 +39,6 @@
       "fps": 12,
       "averageCaptureFps": 26.77483553484964,
       "maximumFrameGap": 0.09002685546875
-    },
-    {
-      "name": "boot-motion",
-      "frames": 158,
-      "duration": 20.333863019943237,
-      "width": 800,
-      "fps": 12,
-      "averageCaptureFps": 7.7702893859880575,
-      "maximumFrameGap": 1.0142180919647217
     }
   ],
   "screenshots": [
@@ -58,8 +49,7 @@
     "viewer-frosted",
     "assembly",
     "search",
-    "settings",
-    "boot"
+    "settings"
   ],
   "errors": []
 }

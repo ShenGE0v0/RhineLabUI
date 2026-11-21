@@ -21,12 +21,10 @@ export class InspectionOverlay {
   )!;
   private point =
     this.root.querySelector<SVGCircleElement>("#inspection-point")!;
-  private label = document.querySelector<HTMLElement>("#inspection-text")!;
 
   render(
     frame: DecryptionFrame,
     project: (x: number, y: number) => number[],
-    showLabel: boolean,
     enabled = true,
   ) {
     const host = document.querySelector<HTMLElement>("#three-scene")!;
@@ -58,9 +56,5 @@ export class InspectionOverlay {
     this.point.setAttribute("cx", String(cx));
     this.point.setAttribute("cy", String(cy));
     this.point.style.opacity = String(frame.point);
-    this.label.style.opacity = String(enabled && showLabel ? frame.label : 0);
-    this.label.querySelector<HTMLElement>("strong")!.style.opacity = String(
-      frame.labelValue,
-    );
   }
 }

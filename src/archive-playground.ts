@@ -29,7 +29,7 @@ export class ArchivePlayground {
   private entryVisible = false;
   private markerVisible = false;
   get active() { return this.round.status !== "idle"; }
-  constructor(private stage: HTMLElement, private scene: () => ArchiveScene | undefined, private context: () => Context, private mute: (value: boolean) => void, private hitSound: () => void) {
+  constructor(private stage: HTMLElement, private scene: () => ArchiveScene | undefined, private context: () => Context, private mute: (value: boolean) => void) {
     stage.insertAdjacentHTML("beforeend", `<button class="relay-entry" hidden><span>↗</span> 波纹接力</button><section class="relay-hud" hidden aria-label="波纹接力"><div class="relay-heading"><small>RIPPLE RELAY</small><strong class="relay-score">00</strong><p class="relay-message" role="status"></p></div><div class="relay-time"><i></i></div><div class="relay-actions"><button class="relay-retry" hidden>再玩一次</button><button class="relay-exit">结束游戏</button></div></section><button class="relay-target" hidden aria-label="接住波纹"></button>`);
     this.entry = stage.querySelector(".relay-entry")!;
     this.hud = stage.querySelector(".relay-hud")!;
@@ -46,9 +46,6 @@ export class ArchivePlayground {
     this.marker.onclick = () => this.hit(this.round.target);
     window.addEventListener("rhine-wallpaper-properties", e => Object.assign(this.props, (e as CustomEvent<WallpaperProperties>).detail));
     Object.assign(this.props, wallpaperHost()?.properties ?? {});
-    window.addEventListener("rhine-local-sound", event => {
-      this.envelope.ignoreLocalSound((event as CustomEvent<{ until: number }>).detail.until);
-    });
     window.addEventListener("rhine-wallpaper-pause", () => { this.last = 0; });
     document.addEventListener("visibilitychange", () => { this.last = 0; });
   }
@@ -115,11 +112,11 @@ export class ArchivePlayground {
     const archive = this.stage.querySelector<HTMLElement>("#archive-ui");
     if (archive) archive.inert = blocked || mode !== "archive" || this.stage.dataset.workbench === "true";
     const footer = this.stage.querySelector<HTMLElement>(".system-footer");
-    if (footer) footer.inert = blocked || mode === "boot";
+    if (footer) footer.inert = blocked;
   }
   private hit(key: string | null) {
     if (this.context().paused) return;
-    if (this.round.hit(key)) { this.scene()?.relayPulse(key!); this.hitSound(); }
+    if (this.round.hit(key)) this.scene()?.relayPulse(key!);
   }
   tick(time: number) {
     const gap = time - this.last;

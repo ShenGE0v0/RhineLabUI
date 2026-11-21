@@ -10,7 +10,7 @@ const close=async page=>{await page.locator('[data-action="close-modal"]').click
 const stats=page=>page.evaluate(()=>window.rhine.stats());
 try {
  const context=await browser.newContext({viewport:{width:1440,height:900},serviceWorkers:'block',reducedMotion:'reduce'});
- await context.addInitScript(()=>{if(!localStorage.getItem('rhine-settings'))localStorage.setItem('rhine-settings',JSON.stringify({reduced:false,superPerformance:true,colorTheme:'dark',sound:false,music:false}));});
+ await context.addInitScript(()=>{if(!localStorage.getItem('rhine-settings'))localStorage.setItem('rhine-settings',JSON.stringify({reduced:false,superPerformance:true,colorTheme:'dark',music:false}));});
  const page=await context.newPage();watch(page);
  const load=async()=>{await page.waitForFunction(()=>window.rhine?.stats().ready);if(await page.locator('.entry-start').count())await page.locator('.entry-start').click();await page.waitForFunction(()=>!document.querySelector('#loading'));};
  await page.goto(process.env.REVIEW_URL||'http://127.0.0.1:5190');await load();
@@ -65,7 +65,7 @@ try {
  const wall=await browser.newContext({viewport:{width:1440,height:900}}), wp=await wall.newPage();watch(wp);
  await wp.goto(process.env.WALLPAPER_URL||'http://127.0.0.1:5176');await wp.waitForFunction(()=>window.rhine?.stats().ready);
  const apply=values=>wp.evaluate(values=>window.wallpaperPropertyListener.applyUserProperties(Object.fromEntries(Object.entries(values).map(([key,value])=>[key,{value}]))),values);
- await apply({boot:false,reduced:false,sound:false,music:false,superperformance:true,hudparallax:true,hudtracking:true,desktopmode:'workbench'});
+ await apply({boot:false,reduced:false,music:false,superperformance:true,hudparallax:true,hudtracking:true,desktopmode:'workbench'});
  await wp.waitForFunction(()=>window.rhine.stats().mode==='archive');await settings(wp);
  await wp.locator('[data-motion="pointerParallax"]').uncheck();await close(wp);await wp.mouse.move(1200,200);
  await wp.waitForFunction(()=>document.querySelector('#stage').dataset.hudTracking==='false');

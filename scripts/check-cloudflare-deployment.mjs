@@ -13,7 +13,7 @@ if (actual.version !== expected.version || JSON.stringify(actual.files) !== JSON
   throw Error(`Release mismatch: expected ${expected.version}, got ${actual.version}`);
 let next = 0;
 let checked = 0;
-const files = [...expected.files, 'sw.js', 'update.html', 'update.js', 'fonts/novecento/RhineLabNovecento.css'];
+const files = [...expected.files, 'sw.js', 'update.html', 'update.js'];
 await Promise.all(Array.from({ length: 6 }, async () => {
   while (next < files.length) {
     const path = files[next++];

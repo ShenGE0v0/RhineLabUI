@@ -9,7 +9,7 @@ const errors=[];page.on('pageerror',e=>errors.push(String(e)));
 await page.goto('http://127.0.0.1:5176/?scene=archive');
 await page.waitForFunction(()=>window.wallpaperPropertyListener&&document.querySelector('.wb-clock')?.textContent);
 async function apply(values){await page.evaluate(values=>window.wallpaperPropertyListener.applyUserProperties(Object.fromEntries(Object.entries(values).map(([k,value])=>[k,{value}]))),values);await page.waitForTimeout(650)}
-await apply({desktopmode:'workbench',boot:false,music:false,sound:false,reduced:true,hudtracking:false,uifrost:true,screenfinish:true,screengrain:20,screenfringe:20,screenvignette:20,task1:'记录本次实验结果',task2:'整理观测资料',task3:'完成今日工作'});
+await apply({desktopmode:'workbench',boot:false,music:false,reduced:true,hudtracking:false,uifrost:true,screenfinish:true,screengrain:20,screenfringe:20,screenvignette:20,task1:'记录本次实验结果',task2:'整理观测资料',task3:'完成今日工作'});
 await page.waitForTimeout(1500);
 const selectors=['.wb-overview','.wb-module','.brand','.wb-nav button','.relay-entry','.system-footer > span','.system-footer > button'];
 async function measure(){return page.evaluate(selectors=>selectors.map(s=>{const n=document.querySelector(s),r=n.getBoundingClientRect(),c=getComputedStyle(n);return {s,x:r.x,y:r.y,w:r.width,h:r.height,overflowX:c.overflowX,overflowY:c.overflowY}}),selectors)}

@@ -35,12 +35,16 @@ export class Workbench {
   private visibility: WorkbenchVisibility = defaultWorkbenchVisibility();
   constructor(private stage: HTMLElement, private onMode: () => void, private onLane: (lane: number) => void) {
     try {
-      const saved = JSON.parse(localStorage.getItem(key) ?? "null");
-      this.timer = restoreTimer(saved?.timer);
-      if (saved?.date === this.date && Array.isArray(saved.done)) this.done = saved.done.filter((s: unknown) => typeof s === "string").slice(0, 3);
+      const raw: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
+      // The store is shared with older builds and can be hand-edited; read only
+      // the fields this version understands and ignore everything else.
+      const saved = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+      this.timer = restoreTimer(saved.timer);
+      if (typeof saved.date === "string" && saved.date === this.date && Array.isArray(saved.done))
+        this.done = saved.done.filter((s: unknown) => typeof s === "string").slice(0, 3);
     } catch { this.storageOK = false; }
     stage.insertAdjacentHTML("beforeend", `<section class="workbench" hidden aria-label="桌面工作台">
-      <div class="wb-overview"><div class="wb-time"><div class="wb-kicker">RHINE LAB / DAILY TERMINAL</div><time class="wb-clock"></time><div class="wb-date"></div></div>
+      <div class="wb-overview"><div class="wb-time"><div class="wb-kicker">DEEPDEMOS / DAILY TERMINAL</div><time class="wb-clock"></time><div class="wb-date"></div></div>
       <section class="wb-today"><div class="wb-heading"><h2>今日事项</h2><span class="wb-task-count"></span></div><div class="wb-tasks"></div></section></div>
       <section class="wb-module"><div class="wb-kicker">PERSONAL WORKSPACE <span class="wb-index">01 / 05</span></div><h2 class="wb-title"></h2><div class="wb-content"></div><p class="wb-storage" role="status"></p></section>
       <nav class="wb-nav" aria-label="工作台功能">${names.map((n, i) => `<button data-wb-lane="${i}" aria-pressed="false"><small>0${i + 1}</small>${n}<span>↗</span></button>`).join("")}</nav>
@@ -91,7 +95,7 @@ export class Workbench {
     this.syncElements();
   }
   syncVisibility() {
-    const hidden = !this.enabled || this.stage.dataset.mode === "boot";
+    const hidden = !this.enabled;
     const entering = this.root.hidden && !hidden;
     const reduced = !this.motion.surfaceTransitions;
     this.root.inert = hidden;

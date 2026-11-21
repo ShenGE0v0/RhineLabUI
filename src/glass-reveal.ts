@@ -3,10 +3,10 @@
 const FEATHER = 0.12;
 export const FROSTED_ROUGHNESS = 0.42;
 export const CLEAR_ROUGHNESS = 0.025;
-const FROST_SPAN = 0.016;
+const FROST_SPAN = 0.01;
 
 // Three's default mip rule grows blur relative to an object as the viewport
-// shrinks. Bound the frosted footprint to 1.6% of the projected cover height.
+// shrinks. Bound the frosted footprint to 1% of the projected cover height.
 export function frostedTransmissionLod(
   panelPixels: number,
   textureWidth: number,

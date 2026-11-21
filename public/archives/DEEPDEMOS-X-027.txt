@@ -1,0 +1,16 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-027 / APFSDS钢针侵彻仿真
+未标注
+
+平台：DSH
+收录日期：2026-08-31
+作者：public
+类型：WEB
+
+采用有限元对二维钢针侵彻均质钢装甲就行仿真，并使用html形式输出。
+
+作品记录
+1. 使用平台：DSH
+
+来源：https://deepdemos.top/demo/apfsds-_-161665fc
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

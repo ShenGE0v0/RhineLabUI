@@ -12,8 +12,7 @@ for (const name of ["update.html", "update.js", "manifest.webmanifest", "audio/o
   await rm(target, { force: true });
 }
 await copyFile("wallpaper/project.json", resolve(root, "project.json"));
-await copyFile("docs/media/archive.jpg", resolve(root, "preview.jpg"));
-if (project.preview === "preview.gif") await copyFile("wallpaper/preview.gif", resolve(root, "preview.gif"));
+await copyFile("public/icons/icon-512.png", resolve(root, "preview.png"));
 await copyFile("LICENSE", resolve(root, "LICENSE"));
 const html = await readFile(resolve(root, "index.html"), "utf8");
 if (/\b(?:src|href)=["']\//.test(html)) throw new Error("Wallpaper HTML contains root-relative URLs");

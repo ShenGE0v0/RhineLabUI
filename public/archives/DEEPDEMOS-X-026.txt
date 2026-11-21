@@ -1,0 +1,17 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-026 / ESP32-3D
+V4.1FLASH
+
+平台：未标注
+收录日期：2026-10-13
+作者：austin_zhang
+类型：WEB
+
+ESP32 开发板3D展示，包含引脚解释，支持拖拽
+
+作品记录
+1. 生成模型：V4.1FLASH
+2. 题材：仿真
+
+来源：https://deepdemos.top/demo/esp32-3d-893d044e
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

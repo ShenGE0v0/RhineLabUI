@@ -1,0 +1,17 @@
+﻿DEEPDEMOS · AI DEMO ARCHIVE
+FILE X-017 / 3D城市八音盒
+未标注
+
+平台：未标注
+收录日期：2026-08-21
+作者：ricecake
+类型：WEB
+
+一个简单的3D城市八音盒，带三首曲子和日夜循环
+
+作品记录
+1. 生成轮数：3
+2. 题材：3D建模 / 仿真
+
+来源：https://deepdemos.top/demo/3d-f3a0550f
+本文由 deepdemos.top 公开作品信息整理，版权归原作者所有。

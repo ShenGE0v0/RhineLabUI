@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { testScreenshotPath } from "./test-screenshot-path.mjs";
 const { chromium, webkit } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(resolve(process.env.PLAYWRIGHT_MODULE)).href : "playwright");
 const base=process.env.REVIEW_URL || "http://127.0.0.1:5204";
 const output=resolve(".tools/responsive");await mkdir(output,{recursive:true});
@@ -35,7 +36,7 @@ for(const [name,width,height,mobile] of cases.filter(([name])=>!process.env.REVI
  await page.waitForFunction(()=>window.rhine.stats().extraction>=.395,null,{timeout:60000});await page.waitForTimeout(300);
  const entry={name,viewport:{width,height},errors};report.push(entry);
  entry.archive=await inside(page,['.brand','.system-nav','.read-file','.archive-navigation','.column-navigation','.archive-counter'],width,height);
- await page.screenshot({path:resolve(output,`${name}-archive-final.png`)});
+ await page.screenshot({path:testScreenshotPath("responsive",`${name}-archive-final.png`)});
  const before=await stats(page);
  if(mobile){
    const y=Math.round(height*(width>height?.4:.25)),x=Math.round(width*.4);
@@ -59,7 +60,7 @@ for(const [name,width,height,mobile] of cases.filter(([name])=>!process.env.REVI
  await page.waitForFunction(()=>window.rhine.stats().decryption.clarity===1,null,{timeout:60000});await page.waitForTimeout(1400);
  entry.detail=await inside(page,['.back-button','.viewer-open','.detail-content'],width,height);
  entry.detailStats=await stats(page);
- await page.screenshot({path:resolve(output,`${name}-detail-final.png`)});
+ await page.screenshot({path:testScreenshotPath("responsive",`${name}-detail-final.png`)});
  assert.equal(entry.detailStats.extraction,4.05);
  assert.ok(entry.detailStats.canInspect);
  // The document can reach actions on short displays; bookmarking preserves scroll.
@@ -72,7 +73,7 @@ for(const [name,width,height,mobile] of cases.filter(([name])=>!process.env.REVI
  await page.waitForTimeout(550);
  await page.locator('[data-viewer="explode"]').click();await page.waitForFunction(()=>JSON.parse(document.querySelector('.model-viewer').dataset.stats).spread>.999);
  await inside(page,['.viewer-back','.viewer-actions','.viewer-reset','.viewer-surface'],width,height);
- await page.screenshot({path:resolve(output,`${name}-viewer-final.png`)});
+ await page.screenshot({path:testScreenshotPath("responsive",`${name}-viewer-final.png`)});
  const viewerBefore=await page.locator('.model-viewer').evaluate(el=>JSON.parse(el.dataset.stats));
  if(mobile&&engine==='chromium') {
    const host=await page.locator('.viewer-canvas').boundingBox();const x=host.x+host.width*.5,y=host.y+host.height*.5;
@@ -103,7 +104,7 @@ for(const [name,width,height,mobile] of cases.filter(([name])=>!process.env.REVI
      await page.locator('#archive-search').fill('X-001');assert.equal(await page.locator('.result-row').count(),1);
      assert.ok(await page.locator('#archive-search').evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=16));
    }
-   if(action==='settings')await page.screenshot({path:resolve(output,`${name}-settings-final.png`)});
+   if(action==='settings')await page.screenshot({path:testScreenshotPath("responsive",`${name}-settings-final.png`)});
    await page.locator('[data-action="close-modal"]').click();await page.waitForFunction(()=>!document.querySelector('.modal-backdrop'));
  }
  assert.deepEqual(errors,[]);console.log(`${engine} ${name}: passed`);await context.close();

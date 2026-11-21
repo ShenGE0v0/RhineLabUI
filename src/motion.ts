@@ -4,31 +4,6 @@ export const smooth = (t: number) => {
   return t * t * t * (10 + t * (-15 + 6 * t));
 };
 const bell = (x: number, width: number) => Math.exp(-0.5 * (x / width) ** 2);
-export function archiveWave(row: number, lane: number, time: number) {
-  const t = time - 22;
-  // Both authored envelopes are exactly zero outside this interval.
-  if (t <= 0 || t >= 4.35) return 0;
-  const phase = row + (lane - 2) * 0.65;
-  const enter = smooth(t / 0.32);
-  const first = 3 + t * 19;
-  const returning = 32 - (t - 2.3) * 24;
-  // A crest has shoulders and a trailing trough: neighboring files describe
-  // one continuous surface, rather than independent staggered tweens.
-  const packet = (distance: number) =>
-    2.5 * bell(distance, 3.8) - 0.58 * bell(distance - 6, 3.5);
-  return (
-    enter *
-    (packet(phase - first) * (1 - smooth((t - 2.15) / 0.65)) +
-      packet(phase - returning) *
-        smooth((t - 2.17) / 0.32) *
-        (1 - smooth((t - 3.5) / 0.85)))
-  );
-}
-export function extraction(time: number) {
-  return (
-    0.4 * smooth((time - 25.58) / 0.82) + 2.95 * smooth((time - 27.55) / 1.3)
-  );
-}
 // The returning scan leaves two moving shoulders around the selected file.
 // Their delay grows with distance, so the neighboring files keep moving during
 // the first extraction and settle before the second extraction.
@@ -77,23 +52,6 @@ export function idleWave(row: number, lane: number, time: number) {
   return (
     0.075 * Math.sin((time * Math.PI * 2) / 8 + row * 0.3 - lane * 0.45) +
     0.027 * Math.sin((time * Math.PI * 2) / 13 - row * 0.17 + lane * 0.3)
-  );
-}
-
-export function cinematicField(
-  row: number,
-  lane: number,
-  time: number,
-  center = 12,
-  focus = 2,
-) {
-  const handoff = smooth((time - 24.95) / 0.45);
-  const selection = smooth((time - 25.4) / 0.95);
-  const shoulderTime = time + 0.3 * handoff * (1 - selection);
-  return (
-    archiveWave(row, lane, time) * (1 - handoff) +
-    settlingWave(row - center, shoulderTime) *
-      columnStrength(lane, focus, (time - 25.4) / 0.95)
   );
 }
 

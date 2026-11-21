@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { glassRevealGLSL, frostedTransmissionGLSL, FROSTED_ROUGHNESS } from "./glass-reveal.ts";
 import { internalOpticsFragment } from "./internal-optics.ts";
 import { themeMaterial } from "./theme-material";
+import { REVEAL_ROLE, surfaceRole } from "./archive-surfaces";
 
 type Surface = THREE.MeshPhysicalMaterial;
 type Palette = { high: Surface; low?: Surface };
@@ -10,13 +11,22 @@ type Palette = { high: Surface; low?: Surface };
 // on one mesh so transparent shells never overlap during a quality change.
 export class CardAppearance {
   private palettes = new Map<string, Palette>();
+  /** 承载解密揭示的材质名。模型没有这个角色时保持 undefined，揭示退化为无效果。 */
+  private revealSurface?: string;
   disposeSources() {
     for (const palette of this.palettes.values()) { palette.high.dispose(); palette.low?.dispose(); }
     this.palettes.clear();
+    this.revealSurface = undefined;
   }
 
   register(name: string, high: Surface, low?: Surface) {
     this.palettes.set(name, { high, low });
+    if (surfaceRole(name) === REVEAL_ROLE) this.revealSurface = name;
+  }
+
+  /** 模型里有没有可揭示的半透明层。没有时解密与清晰／磨砂开关退化为无效果。 */
+  get hasReveal() {
+    return this.revealSurface !== undefined;
   }
 
   prepare(group: THREE.Group) {
@@ -29,14 +39,26 @@ export class CardAppearance {
         continue;
       }
       const mat = palette.high.clone();
+      if (name === "REF_Tape") {
+        mat.color.set("#d8c8b2");
+        mat.roughness = 0.7;
+        mat.metalness = 0;
+      }
+      if (name === "REF_SealPaper") {
+        mat.color.set("#f2e8d7");
+        mat.roughness = 0.66;
+        mat.metalness = 0;
+      }
       const amount = { value: 0 };
       const clarity = { value: 0 };
+      const before = mat.onBeforeCompile;
       mesh.material = mat;
       if (mat.userData.opticalOrder)
         mesh.renderOrder = mat.userData.opticalOrder;
       mesh.userData.appearance = amount;
       mesh.userData.glassClarity = clarity;
-      mat.onBeforeCompile = (shader) => {
+      mat.onBeforeCompile = (shader, renderer) => {
+        before.call(mat, shader, renderer);
         if (mat.userData.opticalOrder)
           shader.fragmentShader = internalOpticsFragment(shader.fragmentShader);
         shader.uniforms.archiveQuality = amount;
@@ -44,7 +66,7 @@ export class CardAppearance {
         shader.fragmentShader =
           "uniform float archiveQuality;\nuniform float archiveClarity;\n" +
           shader.fragmentShader;
-        if (name === "Frosted_Polymer") {
+        if (surfaceRole(name) === REVEAL_ROLE) {
           shader.vertexShader =
             "varying float vArchiveHeight;\nvarying vec2 vArchiveProjectedAxis;\n" + shader.vertexShader;
           shader.vertexShader = shader.vertexShader.replace(
@@ -68,7 +90,7 @@ export class CardAppearance {
           );
           shader.fragmentShader = shader.fragmentShader.replace(
             "#include <color_fragment>",
-            "#include <color_fragment>\ndiffuseColor.rgb *= mix(mix(vec3(0.40, 0.30, 0.20), vec3(1.0, 0.98, 0.94), smoothstep(0.1, 1.0, vArchiveHeight)), vec3(1.0), archiveQuality);",
+            "#include <color_fragment>\ndiffuseColor.rgb *= mix(mix(vec3(0.72, 0.64, 0.53), vec3(1.0, 0.98, 0.94), smoothstep(0.1, 1.0, vArchiveHeight)), vec3(1.0), archiveQuality);",
           );
           shader.fragmentShader = shader.fragmentShader.replace(
             "#include <roughnessmap_fragment>",
@@ -83,8 +105,9 @@ export class CardAppearance {
           );
         }
       };
+      const cache = mat.customProgramCacheKey.bind(mat)();
       mat.customProgramCacheKey = () =>
-        `archive-surface-clarity-${name}-${Boolean(palette.low)}`;
+        `${cache}-archive-surface-clarity-${name}-${Boolean(palette.low)}`;
       mesh.userData.subduedIndex = { value: 0 };
       mesh.userData.themeAmount = themeMaterial(mat, name, false, mesh.userData.subduedIndex);
     }
@@ -97,9 +120,11 @@ export class CardAppearance {
       if (!(child instanceof THREE.Mesh) || !child.userData.glassClarity)
         return;
       child.userData.glassClarity.value = clarity;
-      if (child.userData.surface !== "Frosted_Polymer") return;
+      if (!this.revealSurface) return;
+      if (child.userData.surface !== this.revealSurface) return;
       const mat = child.material as Surface;
-      const palette = this.palettes.get("Frosted_Polymer")!;
+      const palette = this.palettes.get(this.revealSurface);
+      if (!palette) return;
       const quality = child.userData.appearance.value as number;
       const baseline = (
         key: "thickness" | "transmission" | "attenuationDistance",

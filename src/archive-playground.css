@@ -13,7 +13,7 @@
 .relay-target { width: 46px; height: 46px; transform: translate(-50%, -50%); border: 1px solid #7b6035; background: #eee9dfe8; box-shadow: 0 0 0 5px #eee9df44; font-size: 15px; font-variant-numeric: tabular-nums; }
 .relay-target:hover { background: #1d1e19; color: #eee9df; }
 .relay-entry[hidden], .relay-hud[hidden], .relay-target[hidden], .relay-retry[hidden] { display: none; }
-[data-relay]:not([data-mode="boot"]) > :is(.workbench, .brand, .system-footer) { transition: opacity 300ms ease, visibility 0s; }
+[data-relay] > :is(.workbench, .brand, .system-footer) { transition: opacity 300ms ease, visibility 0s; }
 [data-relay="true"] > :is(.workbench, .brand, .system-footer, #archive-ui, .powered, .inspection-overlay) { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 220ms ease-out, visibility 0s 220ms; }
 .reduce-motion[data-relay] > :is(.workbench, .brand, .system-footer, #archive-ui, .powered, .inspection-overlay) { transition: none; }
 .relay-entry:focus-visible, .relay-actions button:focus-visible, .relay-target:focus-visible { outline: 2px solid #9c7642; outline-offset: 5px; }
