@@ -39,6 +39,7 @@ import {
 } from "./archive-slot-underlight";
 import { fileLocation, records, type ArchiveCardStats } from "./data";
 import { modelProvider, type ModelProvider } from "./model-provider";
+import { drawCode39Barcode } from "./code39";
 import {
   cellKey,
   sameCell,
@@ -92,6 +93,11 @@ const OVERVIEW_BADGE_WIDTH = 2048;
 const OVERVIEW_BADGE_HEIGHT = 1485;
 const OVERVIEW_BADGE_SCALE = 1;
 const HOVER_BADGE_HEIGHT = 192;
+const BURN_STAMP_RIGHT = OVERVIEW_BADGE_WIDTH - 90;
+const BURN_STAMP_WIDTH = 525;
+const BURN_STAMP_GAP = 80;
+const BURN_STAMP_TOP = 156;
+const BURN_STAMP_HEIGHT = 96;
 
 /** 卡面版式（对应设计稿 card-A.png 的 2000 × 1480）。
  *  新模型把整张卡面印在贴纸上，运行时按档案重绘，所以这里的坐标就是设计稿坐标。 */
@@ -2754,58 +2760,55 @@ export class ArchiveScene {
 
   private drawMetricIcon(
     c: CanvasRenderingContext2D,
-    kind: "eye" | "download" | "comment",
+    kind: "download" | "comment",
     cx: number,
     cy: number,
     size: number,
+    outlined: boolean,
   ) {
     c.save();
-    c.strokeStyle = c.fillStyle;
-    c.lineWidth = Math.max(4.5, size * 0.14);
     c.lineCap = "round";
     c.lineJoin = "round";
-    if (kind === "eye") {
-      const rx = size * 0.52;
-      const ry = size * 0.34;
-      c.beginPath();
-      c.moveTo(cx - rx, cy);
-      c.quadraticCurveTo(cx, cy - ry * 1.45, cx + rx, cy);
-      c.quadraticCurveTo(cx, cy + ry * 1.45, cx - rx, cy);
-      c.closePath();
-      c.stroke();
-      c.beginPath();
-      c.arc(cx, cy, size * 0.17, 0, Math.PI * 2);
-      c.fill();
-    } else if (kind === "download") {
-      const top = cy - size * 0.42;
-      const arrowTip = cy + size * 0.15;
-      const trayY = cy + size * 0.40;
-      c.beginPath();
-      c.moveTo(cx, top);
-      c.lineTo(cx, arrowTip);
-      c.moveTo(cx - size * 0.27, arrowTip - size * 0.25);
-      c.lineTo(cx, arrowTip);
-      c.lineTo(cx + size * 0.27, arrowTip - size * 0.25);
-      c.moveTo(cx - size * 0.36, trayY);
-      c.lineTo(cx + size * 0.36, trayY);
-      c.stroke();
-    } else {
-      const w = size * 0.86;
-      const h = size * 0.62;
-      const left = cx - w / 2;
-      const top = cy - size * 0.38;
-      const bottom = top + h;
-      c.beginPath();
-      c.moveTo(left, top);
-      c.lineTo(left + w, top);
-      c.lineTo(left + w, bottom);
-      c.lineTo(left + w * 0.35, bottom);
-      c.lineTo(left + w * 0.14, bottom + size * 0.22);
-      c.lineTo(left + w * 0.14, bottom);
-      c.lineTo(left, bottom);
-      c.closePath();
-      c.stroke();
+    const drawShape = () => {
+      if (kind === "download") {
+        const top = cy - size * 0.42;
+        const arrowTip = cy + size * 0.15;
+        const trayY = cy + size * 0.4;
+        c.beginPath();
+        c.moveTo(cx, top);
+        c.lineTo(cx, arrowTip);
+        c.moveTo(cx - size * 0.27, arrowTip - size * 0.25);
+        c.lineTo(cx, arrowTip);
+        c.lineTo(cx + size * 0.27, arrowTip - size * 0.25);
+        c.moveTo(cx - size * 0.36, trayY);
+        c.lineTo(cx + size * 0.36, trayY);
+        c.stroke();
+      } else {
+        const w = size * 0.86;
+        const h = size * 0.62;
+        const left = cx - w / 2;
+        const top = cy - size * 0.38;
+        const bottom = top + h;
+        c.beginPath();
+        c.moveTo(left, top);
+        c.lineTo(left + w, top);
+        c.lineTo(left + w, bottom);
+        c.lineTo(left + w * 0.35, bottom);
+        c.lineTo(left + w * 0.14, bottom + size * 0.22);
+        c.lineTo(left + w * 0.14, bottom);
+        c.lineTo(left, bottom);
+        c.closePath();
+        c.stroke();
+      }
+    };
+    if (outlined) {
+      c.strokeStyle = "#302720";
+      c.lineWidth = Math.max(8, size * 0.28);
+      drawShape();
     }
+    c.strokeStyle = c.fillStyle;
+    c.lineWidth = Math.max(4.5, size * 0.14);
+    drawShape();
     c.restore();
   }
 
@@ -2814,12 +2817,12 @@ export class ArchiveScene {
     index: number,
     left: number,
     right: number,
-    y: number,
+    sampleY: number,
+    metricsY: number,
     hasPhoto: boolean,
   ) {
     const stats = {
       sample: "样本不足 · n=1",
-      views: 105,
       downloads: 30,
       comments: 0,
       ...records[index]?.stats,
@@ -2829,7 +2832,6 @@ export class ArchiveScene {
     const iconGap = 14;
     const metricGap = 36;
     const metrics = [
-      ["eye", stats.views],
       ["download", stats.downloads],
       ["comment", stats.comments],
     ] as const;
@@ -2854,17 +2856,23 @@ export class ArchiveScene {
       c.shadowBlur = 7;
       c.shadowOffsetY = 1;
     }
-    const drawText = (text: string, atX: number) => {
-      if (hasPhoto) c.strokeText(text, atX, y);
-      c.fillText(text, atX, y);
-    };
-
     c.font = "500 44px MiSans, sans-serif";
-    drawText(fitOneLine(c, stats.sample, x - left - 56), left);
+    const sample = fitOneLine(c, stats.sample, (right - left) * 0.54);
+    if (hasPhoto) c.strokeText(sample, left, sampleY);
+    c.fillText(sample, left, sampleY);
     for (const label of labels) {
-      this.drawMetricIcon(c, label.kind, x + iconSize / 2, y, iconSize);
+      this.drawMetricIcon(
+        c,
+        label.kind,
+        x + iconSize / 2,
+        metricsY,
+        iconSize,
+        hasPhoto,
+      );
       c.font = label.font;
-      drawText(label.text, x + iconWidth);
+      const textX = x + iconWidth;
+      if (hasPhoto) c.strokeText(label.text, textX, metricsY);
+      c.fillText(label.text, textX, metricsY);
       x += label.width + metricGap;
     }
   }
@@ -2896,7 +2904,9 @@ export class ArchiveScene {
     c.textBaseline = "alphabetic";
 
     const textX = 139;
-    const textWidth = OVERVIEW_BADGE_WIDTH - 2 * textX;
+    const textWidth = showModel
+      ? BURN_STAMP_RIGHT - BURN_STAMP_WIDTH - BURN_STAMP_GAP - textX
+      : OVERVIEW_BADGE_WIDTH - 2 * textX;
     const titleTop = 44;
     c.fillStyle = WARM.ink;
     c.font = "bold 92px MiSans, sans-serif";
@@ -2931,6 +2941,30 @@ export class ArchiveScene {
     return modelBottom;
   }
 
+  private drawBurnStamp(c: CanvasRenderingContext2D, index: number) {
+    const burnTime = records[index]?.date?.trim() || "0000-00-00";
+    const x = BURN_STAMP_RIGHT - BURN_STAMP_WIDTH;
+    c.save();
+    c.textAlign = "right";
+    c.textBaseline = "alphabetic";
+    c.fillStyle = WARM.ink;
+    c.font = "600 44px MiSans, sans-serif";
+    c.fillText(
+      fitOneLine(c, `刻录时间：${burnTime}`, BURN_STAMP_WIDTH),
+      BURN_STAMP_RIGHT,
+      126,
+    );
+    drawCode39Barcode(
+      c,
+      burnTime,
+      x,
+      BURN_STAMP_TOP,
+      BURN_STAMP_WIDTH,
+      BURN_STAMP_HEIGHT,
+    );
+    c.restore();
+  }
+
   private drawHoverBadge(index: number) {
     if (index === this.hoverBadgeIndex || !this.hoverBadgeUniform.value) return;
     const c = this.hoverBadgeCanvas.getContext("2d");
@@ -2954,13 +2988,18 @@ export class ArchiveScene {
     c.setTransform(OVERVIEW_BADGE_SCALE, 0, 0, OVERVIEW_BADGE_SCALE, 0, 0);
     c.clearRect(0, 0, OVERVIEW_BADGE_WIDTH, OVERVIEW_BADGE_HEIGHT);
     const headingBottom = this.drawOverviewHeading(c, index, true);
-    this.overviewBadgeHeadingEdge.value = 1 - (headingBottom + 3) / OVERVIEW_BADGE_HEIGHT;
+    this.drawBurnStamp(c, index);
+    const headingEdge = Math.max(
+      headingBottom + 3,
+      BURN_STAMP_TOP + BURN_STAMP_HEIGHT + 20,
+    );
+    this.overviewBadgeHeadingEdge.value = 1 - headingEdge / OVERVIEW_BADGE_HEIGHT;
 
-    // 2. Middle Replaceable Showcase Photo (x -2.12..+2.12, y 0.88..2.67)
-    const px = 105;
+    // 2. Middle Replaceable Showcase Photo, expanded to the card margins.
+    const px = 48;
     const py = 386;
-    const pw = 1838;
-    const ph = 776;
+    const pw = 1952;
+    const ph = 1032;
     const photo = this.cardPhotos.get(index);
     const hasPhoto = Boolean(photo?.naturalWidth && photo.naturalHeight);
     c.save();
@@ -3016,27 +3055,22 @@ export class ArchiveScene {
         c.stroke();
       }
 
-      const metaText = [record?.category, record?.date]
-        .filter(Boolean)
-        .join("  ·  ");
       c.textAlign = "center";
       c.textBaseline = "middle";
       c.fillStyle = "#7a6f62";
       c.font = "500 28px MiSans, sans-serif";
       c.fillText("SHOWCASE PHOTO  ·  可替换展示照片", px + pw / 2, py + ph * 0.46);
-      if (metaText) {
-        c.fillStyle = "#8a7e6e";
-        c.font = "400 26px MiSans, sans-serif";
-        c.fillText(metaText, px + pw / 2, py + ph * 0.55);
-      }
     }
-    this.drawShowcaseStats(c, index, px + 54, px + pw - 54, py + ph - 64, hasPhoto);
+    this.drawShowcaseStats(
+      c,
+      index,
+      px + 64,
+      px + pw - 64,
+      py + ph - 64,
+      py + 64,
+      hasPhoto,
+    );
     c.restore();
-
-    // Frame the image and the overlaid stats together.
-    c.strokeStyle = "#1f1d1a";
-    c.lineWidth = 5;
-    c.strokeRect(px + 2.5, py + 2.5, pw - 5, ph - 5);
 
     c.restore();
     this.overviewBadgeTexture.needsUpdate = true;

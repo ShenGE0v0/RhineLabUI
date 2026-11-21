@@ -1535,7 +1535,6 @@ Object.assign(window, {
     setCardStats: (
       stats: {
         sample?: string;
-        views?: number;
         downloads?: number;
         comments?: number;
       } | null,

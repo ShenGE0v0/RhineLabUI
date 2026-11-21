@@ -2,7 +2,6 @@ import content from "../content/archives.json" with { type: "json" };
 
 export interface ArchiveCardStats {
   sample?: string;
-  views?: number;
   downloads?: number;
   comments?: number;
 }

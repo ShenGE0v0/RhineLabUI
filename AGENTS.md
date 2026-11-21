@@ -542,7 +542,7 @@ WE 画质下拉增加「自定义」，仅此选择且超级模式关闭时显�
 
 ### 当前范围与状态
 
-- 本轮完成四项改动：① 优化点开详情的球面双弹簧镜头调度；② 移除进入详情的磨砂变透明解密揭示（网页端与壁纸端统一保持磨砂卡匣质感）；③ 统一采用 `seal-on-cassette-layout.blend` 定稿模型并将工作区 57 个老建模／旧脚本文件与 5 个旧目录移入 Windows 回收站；④ 在磨砂卡匣正面（`REF_Glass`）重设计「左上模型名称铭牌 + 中部可替换展示照片 + 底部四项数据标签」三区版式。
+- 本轮完成四项改动：① 优化点开详情的球面双弹簧镜头调度；② 移除进入详情的磨砂变透明解密揭示（网页端与壁纸端统一保持磨砂卡匣质感）；③ 统一采用 `seal-on-cassette-layout.blend` 定稿模型并将工作区 57 个老建模／旧脚本文件与 5 个旧目录移入 Windows 回收站；④ 在磨砂卡匣正面（`REF_Glass`）重设计「左上模型名称铭牌 + 中部可替换展示照片 + 左下样本状态与右上互动数据」三区版式。
 - 本地 Vite 开发服务持续运行于 http://127.0.0.1:5173/ ；未提交、未推送、未合并。
 
 ### 本轮改动清单
@@ -559,19 +559,22 @@ WE 画质下拉增加「自定义」，仅此选择且超级模式关闭时显�
 - **统一采用定稿模型并清理老建模至 Windows 回收站**：
   - 保留唯一 Blender 源模型 `design-preview/label-variants/seal-study/seal-on-cassette-layout.blend`（1,096,758 B）、导出目录 `web-export/archive-cassette-latest.glb` 与 `archive-assembly-latest.glb`、线上资产 `public/assets/archive-cassette.glb`（SHA-256 `6B2296A7EB3C3E9CCAEE0B6772E422227D0AA2B578718D19F0D09A2A07899960`）与 `public/assets/archive-assembly.glb`（SHA-256 `A96478144F826C25A12FEBD3B7D22C0A9C6E965DF4799B8E1F4984010F17D00D`）、导出与贴图脚本链（`export_cassette_layout.py`、`draw_card_layout.py`、`ref/export_production.py`、`ref/draw_ref_texture.py`、`ref/tex/card.png`）、交接文档、`reference/` 下 7 个 Git 对照 GLB 以及 `_backup/` 下 3 个近期代码／清理备份目录。
   - 通过 `Microsoft.VisualBasic.FileIO.FileSystem`（`SendToRecycleBin`）将 57 个旧文件（`public/assets/archive-cassette.glb.bak-before-ref`、`art/` 下 11 个初版 `.blend/.py/.png`、`design-preview/` 根目录 37 个 A 版／Glass 版 `.blend/.glb/.py`、`label-variants/ref/` 5 个旧 `.blend/.blend1/.bak/.glb`、`label-variants/seal-study/` 3 个过程草稿 `.blend`）与 5 个旧目录（`design-preview/pre-bevel-fix` 及 `_backup/` 下 4 个 11/15–11/18 换模备份目录）移入 Windows 回收站。
-- **磨砂卡匣正面三区版式重设计（模型名称 + 可替换展示照片 + 底部四项标签）**（`src/data.ts`、`src/archive-overview-look.ts`、`src/scene.ts`、`src/main.ts`）：
+- **磨砂卡匣正面三区版式重设计（模型名称 + 可替换展示照片 + 左下样本状态与右上互动数据）**（`src/data.ts`、`src/archive-overview-look.ts`、`src/scene.ts`、`src/main.ts`）：
   - `src/archive-overview-look.ts`：`archiveOverviewBadge` 采样范围扩展为完整 `REF_Glass` 正面（局部坐标 `x: -2.362..2.362`、`y: 0.139..3.565`，尺寸 `4.724 × 3.426`），采用 `2048 × 1485` RGBA 透明画布并按 `plateSample.a` 混合；透明区域完整保留磨砂玻璃与左下琥珀底光透射，不透明印制区域在浅色与暗色主题下均清晰呈现。
   - `src/scene.ts`（`drawOverviewBadge`、`drawMetricIcon`、`setCardPhoto`、`setCardStats`）：
     1. **左上模型名称铭牌**（`x: 105, y: 6, w: 746, h: 295`，对应局部 `x: -2.12..-0.40, y: 2.87..3.55`）：暖白底 `#faf5ec`、`4px` 深色边框，上部显示档案编号（如 `X-001`）与分隔线，下部显示自动换行／字号适配的模型名称（如 `CLAUDE SONNET-5.5`），在总览微抬与详情态位置完全连续。
-    2. **中部可替换展示照片框**（`x: 105, y: 386, w: 1838, h: 776`，对应局部 `x: -2.12..+2.12, y: 0.88..2.67`）：`5px` 直角深色外框；当档案配置了 `cover` 或调用 `setCardPhoto(src, index?)` 时自动异步加载图片并按 `object-fit: cover` 居中裁切高清绘制；未配置图片时绘制暖纸渐变底、细建筑网格、四角取景线及居中的档案标题／分类日期占位说明。
-    3. **底部四项数据与状态标签**（`y: 1222, h: 124`，左对齐 `x: 105`，间距 `28px`）：第一项为暖灰底 `#f0ece2` + 深灰框 `#444444`（`5.5px`）的状态标签（默认 `样本不足 · n=1`）；后三项为暖白底 `#faf7f0` + 纯黑框 `#111111`（`6.5px`）配矢量图标（浏览眼睛、下载箭头托盘、评论气泡）与数值标签（默认 `105`、`30`、`0`），总宽超界时自动等比收敛。
-  - `src/data.ts` 与 `src/main.ts`：`ArchiveRecord` 新增可选 `cover?: string` 与 `stats?: ArchiveCardStats`（`sample`、`views`、`downloads`、`comments`）；`window.rhine` 新增 `setCardPhoto(src, index?)` 与 `setCardStats(stats, index?)` 供运行时即时替换。
+    2. **中部可替换展示照片框**（`x: 48, y: 386, w: 1952, h: 1032`，对应局部 `x: -2.25..+2.25, y: 0.29..2.67`）：按 2026-11-22 用户标注扩大到卡面近满幅，保留窄侧边和底边，并移除照片框外描边；当档案配置了 `cover` 或调用 `setCardPhoto(src, index?)` 时自动异步加载图片并按 `object-fit: cover` 居中裁切高清绘制；未配置图片时绘制暖纸渐变底、细建筑网格、四角取景线及居中占位说明。
+    3. **照片区数据与状态**（2026-11-22 用户标注调整）：左下角保留默认 `样本不足 · n=1` 状态；下载箭头与评论气泡两项（默认 `30`、`0`）位于照片框右上角，浏览数已移除。照片存在时文字与矢量图标均使用浅色填充加 `5px` 深色描边，图标另加按尺寸自适应的深色外描边保证浅色照片上的可读性；超宽数值会压缩文字，图标尺寸保持固定。
+    4. **右上刻录时间与 Code 39 条形码**（`x: 1433..1958, y: 126..252`）：读取档案的 `date` 字段，以 `刻录时间：YYYY-MM-DD` 显示，并在下方绘制同一字符串的标准 Code 39 条码；条码直接绘制在卡面上，不铺独立底色。抬头区的受光边界延伸到条码底部以下 `20px`，避免待定进入选中时的明暗分界线横穿条码形成灰带。标题区为右侧印章预留 `80px` 间距，避免长标题覆盖。编码与绘制位于 `src/code39.ts`。
+  - `src/data.ts` 与 `src/main.ts`：`ArchiveRecord` 新增可选 `cover?: string` 与 `stats?: ArchiveCardStats`（`sample`、`downloads`、`comments`）；`window.rhine` 新增 `setCardPhoto(src, index?)` 与 `setCardStats(stats, index?)` 供运行时即时替换。
+  - `src/code39.ts`：新增标准 Code 39 编码与 Canvas 绘制，当前用于把档案日期同步写成可扫描条形码。
 
 ### 已通过验证与最新收尾待办
 
 - 本轮全部改动后已实跑通过：`.\node_modules\.bin\tsc -p tsconfig.json --noEmit`、`npm run check:content`（18/18）、`npm run check:viewport`、`node scripts/check-loop.mjs`、`node scripts/check-archive-visibility.mjs`、`node scripts/check-motion.mjs`、`node scripts/check-motion-preferences.mjs`、`node scripts/check-theme.mjs`、`node --experimental-strip-types scripts/check-archive.mjs`、`node scripts/check-assembly.mjs`、`node scripts/check-shell.mjs`、`node scripts/check-internal-optics.mjs`，并通过 `dev-shot.mjs` 实机截图（`RhineLabUI-screenshots/card-redesign-detail.png`）核验详情态三区版式与磨砂底光效果。
+- 2026-11-22 灰带与条码底色修复后通过同一组 TypeScript、生产构建、壁纸构建、内容／视口／档案检查及 `git diff --check`；实机截图 `RhineLabUI-screenshots/card-burn-transition.png` 与 `card-burn-no-bg.png` 已核验待定→选中过渡帧和正常选中帧均无横穿条码的灰带，条码无独立底色。独立只读复核无阻断／应修项。
 - 仍待收尾项（按「交付工作流」推进）：
   1. 清理 `src/scene.ts` 未引用的 `ISOLATED_SPOT_LIGHTS_FRAGMENT` 常量，并评估 `this.ao.enabled = false` 是否应仅针对浅色总览而非全局关闭；
-  2. 待用户确认重设计后的正面三区版式（或接入各档案真实 `cover` 展示图与 `stats` 数据）后，重新执行 `npm run build` 与 `npm run build:wallpaper` 更新构建产物（顺带移除旧构建中残留的 `.bak-before-ref` 副本）；
+  2. 待用户确认最新照片框尺寸与三区版式（或接入各档案真实 `cover` 展示图与 `stats` 数据）；确认后按需重新执行 `npm run build` 与 `npm run build:wallpaper`；
   3. 复跑其余浏览器／回归检查脚本并核验壁纸模式、360° 查看器、暗色模式与超级性能模式；
   4. 派独立只读子代理审计并按三级清单修正复验后，提交四项交付报告等待用户终审（未经终审不提交、不推送、不合并）。
