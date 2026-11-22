@@ -1,10 +1,47 @@
-import {createRequire} from 'node:module';
-import {readFile,mkdir,writeFile} from 'node:fs/promises';
-import {pathToFileURL} from 'node:url';
-import {resolve} from 'node:path';
+// Run against the Wallpaper Engine Vite preview (--mode wallpaper).
 import assert from 'node:assert/strict';
-const require=createRequire(import.meta.url),{chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-const browser=await chromium.launch({channel:'msedge',headless:true});
-try{const page=await browser.newPage({viewport:{width:1280,height:720}});await page.goto(pathToFileURL(resolve('verification/wallpaper-image/test.html')).href);for(const file of ['src/style.css','src/theme.css','src/wallpaper-effects.css'])await page.evaluate(css=>{const style=document.createElement('style');style.textContent=css;document.head.append(style)},await readFile(file,'utf8'));await page.evaluate(()=>{document.querySelector('#stage').style.cssText='position:fixed;inset:0';document.querySelector('#stage').insertAdjacentHTML('beforeend','<div class="scene-atmosphere archive-atmosphere" style="opacity:1"></div>')});
-const results=[];for(const dark of [false,true])for(const value of [100,50,0]){await page.evaluate(({dark,value})=>{document.documentElement.dataset.darkSurface=String(dark);document.documentElement.style.setProperty('--theme-paper-rgb',dark?'40,44,48':'234,229,225');background.update({customwallpaper:{value:true},customwallpaperfile:{value:'E:/AIProject/RhineLabUI/reference/extracted-3088099655/wallpaper-2.jpg'},customwallpapermask:{value}},true,true)},{dark,value});await page.waitForFunction(()=>document.querySelector('.wallpaper-background').dataset.ready==='true');await page.waitForTimeout(100);const result=await page.locator('.scene-atmosphere').evaluate(el=>({opacity:getComputedStyle(el).opacity,size:getComputedStyle(el).backgroundSize}));assert.equal(result.opacity,value===0?'0':'1');assert.ok(result.size.includes(`${value}%`));results.push({dark,value,...result});await mkdir('verification/wallpaper-mask',{recursive:true});await page.screenshot({path:`verification/wallpaper-mask/${dark?'dark':'light'}-${value}.png`})}await writeFile('verification/wallpaper-mask/results.json',JSON.stringify(results,null,2));console.log('Light/dark mask ranges 100, 50, 0 passed.')}finally{await browser.close()}
+import { mkdir, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { testScreenshotPath } from './test-screenshot-path.mjs';
 
+const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const browser = await chromium.launch({ channel: process.env.REVIEW_CHANNEL || 'msedge', headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  // Wait for these test properties just as the file-based CEF host does.
+  await page.addInitScript(() => { window.wallpaperRegisterAudioListener = () => {}; });
+  await page.goto(process.env.WALLPAPER_URL || 'http://127.0.0.1:5176/');
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><rect width="100%" height="100%" fill="#bfd0db"/></svg>';
+  const image = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  const apply = props => page.evaluate(values => {
+    window.wallpaperPropertyListener.applyUserProperties(
+      Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value }])),
+    );
+  }, props);
+  await apply({ load3donstartup: false, desktopmode: 'archive', music: false, reduced: true, customwallpaper: true, customwallpaperfile: image });
+  await page.waitForFunction(() => window.rhine?.stats().startup === 'started' &&
+    document.querySelector('#stage').dataset.customWallpaperVisible === 'true');
+
+  const results = [];
+  for (const value of [100, 50, 0]) {
+    await apply({ customwallpaper: true, customwallpapermask: value });
+    const result = await page.locator('.archive-atmosphere').evaluate(el => ({
+      opacity: getComputedStyle(el).opacity,
+      top: getComputedStyle(el, '::before').backgroundSize,
+      bottom: getComputedStyle(el, '::after').backgroundSize,
+    }));
+    assert.equal(result.opacity, value === 0 ? '0' : '1');
+    assert.deepEqual(result.top.split(', ').slice(0, 2), [`100% ${value}%`, '100% 100%']);
+    assert.equal(result.bottom.split(', ')[0], `100% ${value}%`);
+    results.push({ value, ...result });
+    await page.screenshot({ path: testScreenshotPath('wallpaper-mask', `${value}.png`) });
+  }
+  assert.deepEqual(errors, []);
+  await mkdir('.tools/wallpaper-mask', { recursive: true });
+  await writeFile('.tools/wallpaper-mask/results.json', JSON.stringify(results, null, 2));
+  console.log('Wallpaper mask ranges 100, 50, 0 passed.');
+} finally {
+  await browser.close();
+}

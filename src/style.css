@@ -797,7 +797,7 @@ button {
   top: 0;
   z-index: 3;
   /* Opaque on purpose: scrolling content must not show through under the bar. */
-  background: var(--theme-panel, #edebe4);
+  background: #edebe4;
   padding-top: 35px;
 }
 .modal-top button {
@@ -1335,6 +1335,7 @@ button {
   justify-content: center;
   flex-direction: column;
   z-index: 50;
+  will-change: opacity;
   transition: opacity 0.6s;
 }
 .loading.loaded {

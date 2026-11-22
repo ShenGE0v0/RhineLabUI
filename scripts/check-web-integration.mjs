@@ -25,7 +25,7 @@ try {
   assert.equal(await page.locator('.three-toggle').count(), 0);
   assert.equal(await page.evaluate(() => typeof window.wallpaperPropertyListener), 'undefined');
   await page.locator('[data-action="settings"]').click();
-  await page.locator('[data-color-theme="dark"]').click();
+  // 暗色主题已移除：[data-color-theme] 切换按钮随暗色主题一并删除，无需再点选主题。
   await page.locator('[data-pref="superPerformance"]').check();
   await page.waitForTimeout(2000);
   results.fast = await stats();
@@ -33,12 +33,12 @@ try {
   assert.equal(results.fast.motion.reduced, false);
   const savedQuality = await page.evaluate(() => JSON.parse(localStorage.getItem('rhine-settings')).rendering);
   await close();
-  await page.screenshot({ path: 'verification/web-integration/dark-fast.png' });
+  await page.screenshot({ path: 'verification/web-integration/light-fast.png' });
   await page.reload(); await page.waitForFunction(() => window.rhine?.stats().ready);
   await page.locator('.entry-start').click(); await page.waitForFunction(() => window.rhine.stats().startup === 'started');
   await page.evaluate(() => window.rhine.archive()); await page.waitForTimeout(800);
   assert.equal((await stats()).superPerformance, true);
-  assert.equal(await page.evaluate(() => document.documentElement.dataset.darkSurface), 'true');
+  // 暗色主题已移除：document.documentElement.dataset.darkSurface 不再写入，删除该断言。
   await page.locator('[data-action="settings"]').click();
   await page.locator('[data-pref="superPerformance"]').uncheck();
   await close(); await page.waitForTimeout(1000);
@@ -53,7 +53,7 @@ try {
   assert.equal(moving, true);
   await page.evaluate(() => window.rhine.detail()); await page.waitForTimeout(2800);
   assert.equal((await stats()).mode, 'detail');
-  await page.screenshot({ path: 'verification/web-integration/dark-detail.png' });
+  await page.screenshot({ path: 'verification/web-integration/light-detail.png' });
   await page.locator('[data-action="model-viewer"]').click(); await page.waitForTimeout(1600);
   assert.ok(await page.locator('canvas').count() >= 2);
   await page.keyboard.press('Escape'); await page.waitForTimeout(400);
@@ -73,5 +73,5 @@ try {
   results.startupGesture = results.persistedPerformance = results.restoredQuality = results.numericMotion = results.viewer = results.pwaBuild = true;
   results.errors = errors;
   await writeFile('verification/web-integration/results.json', JSON.stringify(results, null, 2));
-  console.log('Web entry, host isolation, theme, performance persistence/restoration, keyboard, clock animation, detail/viewer, responsive and PWA build passed.');
+  console.log('Web entry, host isolation, super performance persistence/restoration, keyboard, clock animation, detail/viewer, responsive and PWA build passed.');
 } finally { await browser.close(); }

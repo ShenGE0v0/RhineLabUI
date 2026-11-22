@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { glassRevealGLSL, frostedTransmissionGLSL, FROSTED_ROUGHNESS } from "./glass-reveal.ts";
 import { internalOpticsFragment } from "./internal-optics.ts";
-import { themeMaterial } from "./theme-material";
 import { REVEAL_ROLE, surfaceRole } from "./archive-surfaces";
 
 type Surface = THREE.MeshPhysicalMaterial;
@@ -34,10 +33,7 @@ export class CardAppearance {
       const mesh = child as THREE.Mesh;
       const name = mesh.userData.surface as string;
       const palette = this.palettes.get(name);
-      if (!palette) {
-        mesh.userData.themeAmount = themeMaterial(mesh.material as THREE.Material, "Printed_Canvas");
-        continue;
-      }
+      if (!palette) continue;
       const mat = palette.high.clone();
       if (name === "REF_Tape") {
         mat.color.set("#d8c8b2");
@@ -108,8 +104,6 @@ export class CardAppearance {
       const cache = mat.customProgramCacheKey.bind(mat)();
       mat.customProgramCacheKey = () =>
         `${cache}-archive-surface-clarity-${name}-${Boolean(palette.low)}`;
-      mesh.userData.subduedIndex = { value: 0 };
-      mesh.userData.themeAmount = themeMaterial(mat, name, false, mesh.userData.subduedIndex);
     }
   }
 
@@ -149,13 +143,6 @@ export class CardAppearance {
         8,
         clarity,
       );
-    });
-  }
-
-  setTheme(group: THREE.Group, value: number, subduedIndex: boolean | number = false) {
-    group.traverse(child => {
-      if (child.userData.themeAmount) child.userData.themeAmount.value = value;
-      if (child.userData.subduedIndex) child.userData.subduedIndex.value = THREE.MathUtils.clamp(Number(subduedIndex), 0, 1);
     });
   }
 
@@ -201,9 +188,12 @@ export class CardAppearance {
       ] as const) {
         mat[key] = THREE.MathUtils.lerp(low[key] ?? 0, high[key] ?? 0, value);
       }
-      // Keep the same transmission shader/pass throughout the transition.
-      if (high.transmission > 0)
+      // Keep the same transmission & clearcoat shader programs throughout the
+      // transition so crossing 0 <-> >0 never triggers a runtime WebGL recompile.
+      if (high.transmission > 0 || (low.transmission ?? 0) > 0)
         mat.transmission = Math.max(0.000001, mat.transmission);
+      if (high.clearcoat > 0 || (low.clearcoat ?? 0) > 0)
+        mat.clearcoat = Math.max(0.000001, mat.clearcoat);
     }
   }
 

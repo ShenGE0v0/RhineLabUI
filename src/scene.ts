@@ -5,8 +5,6 @@ import { InstanceUpdates } from "./instance-updates";
 import { RenderState } from "./render-state";
 import { SharedDepthAO, SharedDepthBokeh } from "./shared-depth";
 import { disposeThreeTree } from "./three-resources";
-import { ThemeWave } from "./theme-motion";
-import { themeMaterial, themeEnvironment } from "./theme-material";
 import { RhythmMotion, rhythmDisplacement, quietBands, type MusicBands, type RhythmStyle } from "./archive-play-motion";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { createArchiveLighting, type LightingLook } from "./archive-lighting";
@@ -139,10 +137,8 @@ const LIGHT_DETAIL_KEY_POSITION = new THREE.Vector3(-21, 20, 14);
 const LIGHT_DETAIL_KEY_TARGET = new THREE.Vector3(-1.5, 0.8, -2.5);
 const LIGHT_DETAIL_KEY_INTENSITY = 290;
 const LIGHT_OVERVIEW_KEY_COLOR = new THREE.Color("#ffead6");
-const DETAIL_KEY_COLOR = new THREE.Color("#ffd8ba");
 const LIGHT_OVERVIEW_FILL_POSITION = new THREE.Vector3(16, 14, 24);
 const LIGHT_OVERVIEW_FILL_COLOR = new THREE.Color("#ffead8");
-const DETAIL_FILL_COLOR = new THREE.Color("#f4e8d8");
 const UNSELECTED_OVERVIEW_BASE_GAIN = 0.84;
 const OVERVIEW_AZIMUTH = THREE.MathUtils.degToRad(60.5);
 const OVERVIEW_ELEVATION = THREE.MathUtils.degToRad(21);
@@ -232,11 +228,6 @@ type OverviewSlotLightUniforms = {
   lateral: { value: number };
   topRail: { value: number };
 };
-const ISOLATED_SPOT_LIGHTS_FRAGMENT =
-  THREE.ShaderChunk.lights_fragment_begin.replace(
-    "getSpotLightInfo( spotLight, geometryPosition, directLight );",
-    "getSpotLightInfo( spotLight, geometryPosition, directLight );\n\t\tdirectLight.color *= 1.0 - archiveBottomLight;",
-  );
 
 /** Blender 导出的最新 REF 资产把物体原点留在左侧；生产相机按模型居中构图。
  *  加载时把 X 归中、Y 落到 0，避免模型在阵列和详情里整体偏出画面。 */
@@ -374,23 +365,21 @@ const COLUMN_SWITCH_WAVE_WIDTH = 2.1;
 const COLUMN_SWITCH_WAVE_AMPLITUDE = 0.85;
 const OVERVIEW_RIGHT_X = Math.cos(OVERVIEW_AZIMUTH);
 const OVERVIEW_RIGHT_Z = Math.sin(OVERVIEW_AZIMUTH);
-// 5-stage overview entrance: flat hold -> right-to-left wave raising the
-// terrace -> pre-select slight lift -> amber bar glide from left-back ->
-// full lift unlock once the bar reaches the selected slot.
+// 4-stage overview entrance: flat hold -> right-to-left wave raising the
+// terrace -> amber bar glide from left-back -> direct full lift unlock once
+// the bar reaches the selected slot (no pre-select half-lift stage).
 const INTRO_FLAT_HOLD = 0.5;
 const INTRO_WAVE_START = 9.5;
 const INTRO_WAVE_SPEED = 13.0;
 const INTRO_WAVE_WIDTH = 2.2;
 const INTRO_WAVE_AMPLITUDE = 1.05;
-const INTRO_PRESELECT_TIME = 1.25;
-const INTRO_PRESELECT_RATIO = 0.45;
 const INTRO_TERRACE_FALLBACK_START = 1.85;
 const INTRO_TERRACE_FALLBACK_SECONDS = 0.55;
-const INTRO_LIGHT_START = 1.75;
+const INTRO_LIGHT_START = 1.35;
 const INTRO_LIGHT_DURATION = 0.85;
 const INTRO_BAR_START_OFFSET = 22;
 const INTRO_FULL_LIFT_THRESHOLD = 0.35;
-const INTRO_TOTAL_DURATION = 3.25;
+const INTRO_TOTAL_DURATION = 3.2;
 const INTRO_RELEASE_DURATION = 0.35;
 const OVERVIEW_WARMUP_BUDGET_MS = 1500;
 /** Terrace weight and transient crest for one cell during the intro.
@@ -542,8 +531,9 @@ export class ArchiveScene {
     this.lastInteraction = this.clock;
     this.renderState.invalidate();
   }
-  finishIntro(snapBar = false) {
+  finishIntro(snapBar = false, skipBadgeRefresh = false) {
     if (!this.intro) return;
+    const barHidden = this.intro.elapsed < INTRO_LIGHT_START;
     if (this.intro.started && this.intro.elapsed < INTRO_TOTAL_DURATION) {
       this.introRelease = {
         elapsed: this.intro.elapsed,
@@ -553,8 +543,32 @@ export class ArchiveScene {
     }
     this.intro = null;
     this.slotUnderlights.setIntroGain(1);
-    if (snapBar) this.slotUnderlights.select(this.selectedCell, true);
+    if (snapBar || barHidden) {
+      this.slotUnderlights.select(this.selectedCell, true);
+    }
+    if (!skipBadgeRefresh && this.pendingOverviewBadgeRefresh) {
+      this.pendingOverviewBadgeRefresh = false;
+      this.drawOverviewBadge(this.selectedIndex);
+    }
     this.renderState.invalidate();
+  }
+  private async waitInitialProviderLogo(timeoutMs = 300) {
+    const modelName = records[this.selectedIndex]?.en ?? "";
+    this.getModelProviderLogo(modelName);
+    const provider = modelProvider(modelName);
+    const img = provider ? this.modelProviderImages.get(provider) : undefined;
+    if (!img || img.complete) return;
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        img.removeEventListener("load", done);
+        img.removeEventListener("error", done);
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      img.addEventListener("load", done);
+      img.addEventListener("error", done);
+    });
   }
   async warmUpOverview() {
     if (
@@ -565,8 +579,39 @@ export class ArchiveScene {
     ) {
       return;
     }
+    await this.waitInitialProviderLogo();
+    if (
+      !this.loaded ||
+      this.disposed ||
+      this.container.clientWidth <= 0 ||
+      this.container.clientHeight <= 0
+    ) {
+      return;
+    }
+    // Pass 1: warm up the active overview state (lifted selected card with
+    // clearcoat/transmission and visible underlight strip) behind #loading so
+    // no shader programs compile mid-intro.
     this.targetReveal = 1;
     this.reveal = 1;
+    this.finishIntro(true);
+    this.introRelease = null;
+    const chosen = this.cellPosition(this.selectedCell);
+    this.columnCamera = { value: chosen.x, velocity: 0 };
+    this.rail = { value: SELECTED_ROW_ANCHOR_Z - chosen.z, velocity: 0 };
+    this.shoulder = { value: this.selectedCell.row, velocity: 0 };
+    this.laneFocus = { value: this.selectedCell.lane, velocity: 0 };
+    this.lift = {
+      value: OVERVIEW_LIFT * (1 - this.flatMix),
+      velocity: 0,
+    };
+    this.slotUnderlights.select(this.selectedCell, true);
+    this.slotUnderlights.setIntroGain(1);
+    this.cameraInitialized = false;
+    this.last = null;
+    this.renderState.invalidate();
+    this.update(performance.now() / 1000);
+
+    // Pass 2: reset back to the flat intro frame 0 before revealing the stage.
     this.playIntro();
     this.last = null;
     this.update(performance.now() / 1000);
@@ -637,9 +682,6 @@ export class ArchiveScene {
     this.loaded = false;
   }
   uiOnlyParallax = false;
-  private theme = new ThemeWave();
-  private subduedIndex = { value: 0 };
-  private selectedIndexOnly = false;
   private superPerformance = false;
   setSuperPerformance(enabled: boolean) {
     if (this.superPerformance === enabled) return;
@@ -1021,7 +1063,6 @@ export class ArchiveScene {
     this.applyOverviewUnderlight(prewarm, "neighbor");
     this.appearance.apply(prewarm, 1);
     this.appearance.setClarity(prewarm, 0);
-    this.appearance.setTheme(prewarm, this.themeAmount);
     prewarm.updateMatrixWorld(true);
     return prewarm;
   }
@@ -1100,7 +1141,6 @@ export class ArchiveScene {
       pool.clear();
     }
   }
-  setSelectedIndexAccent(onlySelected: boolean) { this.selectedIndexOnly = onlySelected; }
   /** Override the moving slot highlight only. The constant low underlight
    *  remains visible for same-camera A/B acceptance. */
   setOverviewSlotLightGain(gain: number) {
@@ -1136,13 +1176,10 @@ export class ArchiveScene {
       }
     }
   }
-  private themeAttribute?: THREE.InstancedBufferAttribute;
   private slotLightAttribute?: THREE.InstancedBufferAttribute;
   private neighborLightAttribute?: THREE.InstancedBufferAttribute;
   private lateralLightAttribute?: THREE.InstancedBufferAttribute;
   private topRailLightAttribute?: THREE.InstancedBufferAttribute;
-  get themeAmount() { return this.theme.background(performance.now() / 1000); }
-  setTheme(dark: boolean, immediate = false) { this.theme.set(dark, performance.now() / 1000, this.selectedCell, immediate); }
   private playfield = { enabled: false, bands: quietBands(), strength: 1, flatten: 0, target: null as string | null, breathing: true };
   private flatMix = 0;
   private rhythm = new RhythmMotion();
@@ -1192,7 +1229,7 @@ export class ArchiveScene {
   private ao: SharedDepthAO;
   private bokeh: BokehPass;
   private readonly overviewBottomLight = { value: 0 };
-  private readonly arrayBottomLight = { value: 0 };
+  private readonly arrayBottomLight = { value: 1 };
   private readonly lightKeyPositionScratch = new THREE.Vector3();
   private readonly lightKeyTargetScratch = new THREE.Vector3();
   private readonly overviewTrackOffset = { value: new THREE.Vector2() };
@@ -1225,13 +1262,9 @@ export class ArchiveScene {
     "#b88b68",
     0,
   );
-  private readonly detailLightPosition = new THREE.Vector3();
-  private readonly detailLightTarget = new THREE.Vector3();
-  private detailLightIntensity = 0;
   private instances: THREE.InstancedMesh[] = [];
   private outgoingPrewarm: THREE.Group[] = [];
   private matrixUpdates?: InstanceUpdates;
-  private themeUpdates?: InstanceUpdates;
   private slotLightUpdates?: InstanceUpdates;
   private neighborLightUpdates?: InstanceUpdates;
   private lateralLightUpdates?: InstanceUpdates;
@@ -1322,7 +1355,6 @@ export class ArchiveScene {
   private targetRotation = 0;
   private light: THREE.SpotLight;
   private fillLight: THREE.DirectionalLight;
-  private readonly fillLightPosition = new THREE.Vector3();
   private clock = 0;
   private pulseClock = 0;
   private loaded = false;
@@ -1334,6 +1366,7 @@ export class ArchiveScene {
     value: undefined as THREE.Texture | undefined,
   };
   private readonly overviewBadgeHeadingEdge = { value: 1 };
+  private pendingOverviewBadgeRefresh = false;
   private readonly hoverBadgeCanvas = document.createElement("canvas");
   private readonly hoverBadgeUniform = { value: undefined as THREE.CanvasTexture | undefined };
   private readonly hoverBadgeInstance = { value: -1 };
@@ -1344,6 +1377,7 @@ export class ArchiveScene {
   >();
   private cardPhotos = new Map<number, HTMLImageElement | null>();
   private cardPhotoSrc = new Map<number, string>();
+  private cardPhotoTokens = new Map<number, number>();
   private cardStatsOverrides = new Map<number, ArchiveCardStats>();
   /** 详情记录卡面按需创建。总览共享 GLB 的烘焙贴图，不参与切档重绘。 */
   private cardCanvas?: HTMLCanvasElement;
@@ -1423,12 +1457,8 @@ export class ArchiveScene {
     );
     this.light = key;
     this.fillLight = fill;
-    this.fillLightPosition.copy(this.fillLight.position);
-    this.detailLightIntensity = this.light.intensity;
-    this.detailLightPosition.copy(this.light.position);
-    this.detailLightTarget.set(0, -2.2, 0);
     this.light.castShadow = true;
-    this.light.target.position.copy(this.detailLightTarget);
+    this.light.target.position.set(0, -2.2, 0);
     this.light.shadow.camera.near = 0.5;
     this.light.shadow.camera.far = 120;
     this.light.shadow.camera.updateProjectionMatrix();
@@ -1722,17 +1752,14 @@ export class ArchiveScene {
         arrayMat.roughness = 0.66;
       }
       this.appearance.register(name, mat, arrayMat);
-      this.themeAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
       this.slotLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
       this.neighborLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
       this.lateralLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
       this.topRailLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
-      geom.setAttribute("archiveTheme", this.themeAttribute);
       geom.setAttribute("archiveSlotLight", this.slotLightAttribute);
       geom.setAttribute("archiveSlotReflection", this.neighborLightAttribute);
       geom.setAttribute("archiveSlotLateral", this.lateralLightAttribute);
       geom.setAttribute("archiveSlotTopRail", this.topRailLightAttribute);
-      themeMaterial(arrayMat, name, true, this.subduedIndex);
       this.installOverviewUnderlight(arrayMat, role, "neighbor", true);
       const inst = new THREE.InstancedMesh(geom, arrayMat, capacity);
       // All surfaces move rigidly together; share the transform buffer on the GPU.
@@ -1924,7 +1951,6 @@ export class ArchiveScene {
     this.appearance.prepare(model);
     this.appearance.apply(model, 1);
     this.appearance.setClarity(model, 0);
-    this.appearance.setTheme(model, this.themeAmount);
     // 拆解模型沿用当前详情的记录卡面。总览仍使用共享烘焙图。
     const cardTexture = this.detailCardTexture(this.selectedIndex);
     if (cardTexture) {
@@ -1956,8 +1982,6 @@ export class ArchiveScene {
       );
       label.position.set(-1.36, 3.04, 0.255);
       label.userData.assemblyPart = "cover";
-      label.userData.themeAmount = themeMaterial(label.material, "Printed_Canvas");
-      label.userData.themeAmount.value = this.themeAmount;
       model.add(label);
       meshes.push(label);
     }
@@ -2412,7 +2436,7 @@ export class ArchiveScene {
     const previousCell = this.selectedCell;
     const cell = selectionCell(index, previousCell, navigation);
     const changed = !sameCell(cell, previousCell);
-    if (changed && this.intro) this.finishIntro();
+    if (changed && this.intro) this.finishIntro(false, true);
     const sameColumnRowSwitch =
       changed && cell.lane === previousCell.lane;
     if (changed && this.loaded && this.lift.value > 0.0001) {
@@ -2433,7 +2457,7 @@ export class ArchiveScene {
         });
       }
       // Clone carries the selected material by reference. Replace it before
-      // installing appearance shaders, so theme hooks are not appended to the
+      // installing appearance shaders, so they are not appended to the
       // original material again on every selection.
       this.appearance.prepare(group);
       this.applyOverviewUnderlight(group, "neighbor");
@@ -2813,12 +2837,27 @@ export class ArchiveScene {
     c.restore();
     this.labelTexture.needsUpdate = true;
   }
-  public setCardPhoto(src: string | null, index = this.selectedIndex) {
+  private refreshSelectedBadge(index: number) {
+    if (index !== this.selectedIndex) return;
+    if (this.intro) {
+      this.pendingOverviewBadgeRefresh = true;
+    } else {
+      this.drawOverviewBadge(index);
+      this.renderState.invalidate();
+    }
+  }
+  private loadCardPhoto(
+    src: string | null,
+    index = this.selectedIndex,
+    refreshBadge = true,
+  ) {
     const target = Math.max(0, Math.min(records.length - 1, Math.floor(index)));
+    const token = (this.cardPhotoTokens.get(target) ?? 0) + 1;
+    this.cardPhotoTokens.set(target, token);
     if (!src) {
       this.cardPhotoSrc.delete(target);
       this.cardPhotos.delete(target);
-      if (target === this.selectedIndex) this.drawOverviewBadge(target);
+      if (refreshBadge) this.refreshSelectedBadge(target);
       return;
     }
     const resolved =
@@ -2830,17 +2869,22 @@ export class ArchiveScene {
     const img = new Image();
     if (/^https?:/i.test(resolved)) img.crossOrigin = "anonymous";
     img.onload = () => {
-      if (this.cardPhotoSrc.get(target) !== resolved) return;
-      this.cardPhotos.set(target, img);
-      if (target === this.selectedIndex) this.drawOverviewBadge(target);
-    };
-    img.onerror = () => {
-      if (this.cardPhotoSrc.get(target) !== resolved) return;
-      this.cardPhotos.set(target, null);
-      if (target === this.selectedIndex) this.drawOverviewBadge(target);
+      void img
+        .decode()
+        .catch(() => {})
+        .then(() => {
+          if (this.disposed || this.cardPhotoTokens.get(target) !== token) {
+            return;
+          }
+          this.cardPhotos.set(target, img);
+          this.refreshSelectedBadge(target);
+        });
     };
     img.src = resolved;
-    if (target === this.selectedIndex) this.drawOverviewBadge(target);
+    if (refreshBadge) this.refreshSelectedBadge(target);
+  }
+  public setCardPhoto(src: string | null, index = this.selectedIndex) {
+    this.loadCardPhoto(src, index, true);
   }
 
   public setCardStats(
@@ -2856,7 +2900,7 @@ export class ArchiveScene {
         ...stats,
       });
     }
-    if (target === this.selectedIndex) this.drawOverviewBadge(target);
+    this.refreshSelectedBadge(target);
   }
 
   private drawMetricIcon(
@@ -2987,9 +3031,13 @@ export class ArchiveScene {
     const image = new Image();
     this.modelProviderImages.set(provider, image);
     image.onload = () => {
-      if (modelProvider(records[this.selectedIndex]?.en ?? "") !== provider) return;
-      this.drawOverviewBadge(this.selectedIndex);
-      this.renderState.invalidate();
+      if (
+        this.disposed ||
+        modelProvider(records[this.selectedIndex]?.en ?? "") !== provider
+      ) {
+        return;
+      }
+      this.refreshSelectedBadge(this.selectedIndex);
     };
     image.src = publicAsset(`assets/model-providers/${provider}.svg`);
   }
@@ -3027,19 +3075,22 @@ export class ArchiveScene {
     c.fillText(model, textX, modelBaseline);
     const modelBottom = modelBaseline + modelMetrics.actualBoundingBoxDescent;
 
+    let headingBottom = modelBottom;
     const logo = this.getModelProviderLogo(modelName);
     if (logo) {
       const logoTop = modelBottom + 24;
       const scale = Math.min(248 / logo.naturalWidth, 120 / logo.naturalHeight);
+      const logoHeight = logo.naturalHeight * scale;
       c.drawImage(
         logo,
         textX,
         logoTop,
         logo.naturalWidth * scale,
-        logo.naturalHeight * scale,
+        logoHeight,
       );
+      headingBottom = logoTop + logoHeight;
     }
-    return modelBottom;
+    return headingBottom;
   }
 
   private drawBurnStamp(c: CanvasRenderingContext2D, index: number) {
@@ -3079,9 +3130,10 @@ export class ArchiveScene {
 
   private drawOverviewBadge(index: number) {
     if (!this.overviewBadgeTexture) return;
+    if (index === this.selectedIndex) this.pendingOverviewBadgeRefresh = false;
     const record = records[index];
     if (record?.cover && !this.cardPhotoSrc.has(index)) {
-      this.setCardPhoto(record.cover, index);
+      this.loadCardPhoto(record.cover, index, false);
     }
     const c = this.overviewBadgeCanvas.getContext("2d");
     if (!c) return;
@@ -3090,17 +3142,16 @@ export class ArchiveScene {
     c.clearRect(0, 0, OVERVIEW_BADGE_WIDTH, OVERVIEW_BADGE_HEIGHT);
     const headingBottom = this.drawOverviewHeading(c, index, true);
     this.drawBurnStamp(c, index);
-    const headingEdge = Math.max(
-      headingBottom + 3,
-      BURN_STAMP_TOP + BURN_STAMP_HEIGHT + 20,
-    );
-    this.overviewBadgeHeadingEdge.value = 1 - headingEdge / OVERVIEW_BADGE_HEIGHT;
-
     // 2. Middle Replaceable Showcase Photo, expanded to the card margins.
     const px = 48;
     const py = 386;
     const pw = 1952;
     const ph = 1032;
+    const headingEdge = Math.min(
+      py - 2,
+      Math.max(headingBottom + 20, BURN_STAMP_TOP + BURN_STAMP_HEIGHT + 20),
+    );
+    this.overviewBadgeHeadingEdge.value = 1 - headingEdge / OVERVIEW_BADGE_HEIGHT;
     const photo = this.cardPhotos.get(index);
     const hasPhoto = Boolean(photo?.naturalWidth && photo.naturalHeight);
     c.save();
@@ -3185,10 +3236,6 @@ export class ArchiveScene {
       inst.dispose();
       inst.instanceMatrix = matrix;
     }
-    const previousTheme = this.themeAttribute;
-    this.themeAttribute = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
-    if (previousTheme) this.themeAttribute.array.set(previousTheme.array);
-    for (const inst of this.instances) inst.geometry.setAttribute("archiveTheme", this.themeAttribute);
     const previousSlotLight = this.slotLightAttribute;
     this.slotLightAttribute = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
     if (previousSlotLight) this.slotLightAttribute.array.set(previousSlotLight.array);
@@ -3208,7 +3255,6 @@ export class ArchiveScene {
       inst.geometry.setAttribute("archiveSlotTopRail", this.topRailLightAttribute);
     }
     this.matrixUpdates = new InstanceUpdates(matrix);
-    this.themeUpdates = new InstanceUpdates(this.themeAttribute);
     this.slotLightUpdates = new InstanceUpdates(this.slotLightAttribute);
     this.neighborLightUpdates = new InstanceUpdates(this.neighborLightAttribute);
     this.lateralLightUpdates = new InstanceUpdates(this.lateralLightAttribute);
@@ -3678,8 +3724,6 @@ export class ArchiveScene {
     const step = !this.motion.surfaceTransitions ? 1 : Math.min(elapsed, .25) / 1.1;
     this.presence += Math.sign(this.presenceTarget - this.presence) * Math.min(step, Math.abs(this.presenceTarget - this.presence));
     this.renderer.domElement.style.opacity = String(THREE.MathUtils.clamp(this.presence / .16, 0, 1));
-    this.theme.beginFrame();
-    themeEnvironment(this.scene, this.renderer, this.themeAmount);
     const blend = 1 - Math.exp(-dt * (this.motion.selectionTransition ? 2.8 : 35));
     const detailBlend = 1 - Math.exp(-dt * (this.motion.detailTransition ? 2.8 : 35));
     this.reveal = THREE.MathUtils.lerp(this.reveal, this.targetReveal, blend);
@@ -3781,10 +3825,6 @@ export class ArchiveScene {
     const activePlay = !this.targetDetail && play.enabled;
     const rhythm = this.rhythm.update(activePlay && !this.reduced ? play.bands : quietBands(), time, dt, this.rhythmStyle);
     this.flatMix += ((activePlay ? play.flatten : 0) - this.flatMix) * (this.reduced ? 1 : 1 - Math.exp(-dt * 4));
-    this.subduedIndex.value = Math.max(Number(this.selectedIndexOnly), this.flatMix);
-    const indexDim = (lift: number) => this.selectedIndexOnly
-      ? 1 - ease(lift / OVERVIEW_LIFT) * (1 - this.flatMix)
-      : this.flatMix;
     const gameTarget = activePlay ? play.target : null;
     if (gameTarget && !this.relayLifts.has(gameTarget)) this.relayLifts.set(gameTarget, 0);
     for (const [key, height] of this.relayLifts) {
@@ -3799,8 +3839,7 @@ export class ArchiveScene {
     // Fixed Web detail frames keep the overview field while logical detail
     // advances independently for decryption and application state.
     const fieldDetail = this.fixedDetailCamera ? 0 : this.detail;
-    const fieldLightOverview =
-      (1 - fieldDetail) * (1 - this.themeAmount);
+    const fieldLightOverview = 1 - fieldDetail;
     const fieldCache = new Map<number, Map<number, number>>();
     const introFieldState = this.intro ?? this.introRelease;
     const introOrigin = this.introRelease?.cell ?? this.selectedCell;
@@ -3937,11 +3976,7 @@ export class ArchiveScene {
     };
     const selectedBase = chosen.y + field(selectedRow, selectedLane);
     const introLiftScale =
-      !this.intro || this.intro.fullLiftUnlocked
-        ? 1
-        : this.intro.elapsed >= INTRO_PRESELECT_TIME
-          ? INTRO_PRESELECT_RATIO
-          : 0;
+      !this.intro || this.intro.fullLiftUnlocked ? 1 : 0;
     if (this.returnY !== null && this.rotation !== 0) {
       this.lift.value = this.returnY - selectedBase;
       this.lift.velocity = 0;
@@ -3993,9 +4028,7 @@ export class ArchiveScene {
     this.detail = THREE.MathUtils.lerp(this.detail, cameraTarget, detailBlend);
     const detail = this.detail;
     const renderDetail = this.fixedDetailCamera ? 0 : detail;
-    const fogTheme = this.themeAmount;
-    const lightTheme = 1 - fogTheme;
-    const lightOverview = (1 - renderDetail) * lightTheme;
+    const lightOverview = 1 - renderDetail;
     const selectedVisualLift = this.overviewVisualLift();
     const selectedDirectLight = this.slotUnderlights.directFor(this.selectedCell);
     this.appearance.apply(
@@ -4039,7 +4072,6 @@ export class ArchiveScene {
         o.group,
         this.appearanceInSlot(o.lift.value, directLight, lightOverview),
       );
-      this.appearance.setTheme(o.group, this.theme.sample(o.cell, time), indexDim(o.lift.value));
       this.appearance.setClarity(o.group, 0);
       this.setGroupSlotLight(
         o.group,
@@ -4079,7 +4111,6 @@ export class ArchiveScene {
         this.pendingPulse = null;
       }
     }
-    this.appearance.setTheme(this.model, this.theme.sample(this.selectedCell, time), indexDim(this.lift.value));
     this.model.position.set(
       chosen.x - trackX,
       chosen.y +
@@ -4245,9 +4276,7 @@ export class ArchiveScene {
       this.camera.position.lerp(cameraPosition, cameraBlend);
       this.cameraAim.lerp(cameraAim, cameraBlend);
       this.camera.lookAt(this.cameraAim);
-      this.camera.rotateZ(
-        LIGHT_OVERVIEW_ROLL * ((1 - cameraDetail) * lightTheme),
-      );
+      this.camera.rotateZ(LIGHT_OVERVIEW_ROLL * (1 - cameraDetail));
       this.camera.fov = THREE.MathUtils.lerp(
         this.camera.fov,
         THREE.MathUtils.radToDeg(
@@ -4264,43 +4293,20 @@ export class ArchiveScene {
     const renderedDistance = this.camera.position.distanceTo(this.cameraAim);
     fog.near =
       renderedDistance +
-      THREE.MathUtils.lerp(
-        5 - 4 * fogTheme,
-        -1,
-        renderDetail,
-      ) -
+      THREE.MathUtils.lerp(5, -1, renderDetail) -
       2 * lightOverview;
     fog.far =
       renderedDistance +
-      THREE.MathUtils.lerp(
-        25 - 9 * fogTheme,
-        12,
-        renderDetail,
-      );
-    fog.color.lerp(OVERVIEW_MIST, lightTheme);
-    (this.scene.background as THREE.Color).lerp(OVERVIEW_MIST, lightTheme);
+      THREE.MathUtils.lerp(25, 12, renderDetail);
+    fog.color.copy(OVERVIEW_MIST);
+    (this.scene.background as THREE.Color).copy(OVERVIEW_MIST);
     // Unified studio rig across overview and detail: soft warm key (with real
     // soft shadows) + sky/bounce hemisphere + front-right fill + warm slot strip.
-    this.scene.environmentIntensity = THREE.MathUtils.lerp(
-      this.scene.environmentIntensity,
-      THREE.MathUtils.lerp(0.18, 0.3, renderDetail),
-      lightTheme,
-    );
-    this.studioSkyLight.intensity =
-      THREE.MathUtils.lerp(0.22, 0.28, renderDetail) * lightTheme;
-    this.fillLight.color
-      .copy(DETAIL_FILL_COLOR)
-      .lerp(LIGHT_OVERVIEW_FILL_COLOR, lightTheme);
-    this.fillLight.intensity = THREE.MathUtils.lerp(
-      this.fillLight.intensity,
-      THREE.MathUtils.lerp(0.07, 0.22, renderDetail),
-      lightTheme,
-    );
-    this.fillLight.position.lerpVectors(
-      this.fillLightPosition,
-      LIGHT_OVERVIEW_FILL_POSITION,
-      lightTheme,
-    );
+    this.scene.environmentIntensity = THREE.MathUtils.lerp(0.18, 0.3, renderDetail);
+    this.studioSkyLight.intensity = THREE.MathUtils.lerp(0.22, 0.28, renderDetail);
+    this.fillLight.color.copy(LIGHT_OVERVIEW_FILL_COLOR);
+    this.fillLight.intensity = THREE.MathUtils.lerp(0.07, 0.22, renderDetail);
+    this.fillLight.position.copy(LIGHT_OVERVIEW_FILL_POSITION);
     this.overviewTrackOffset.value.set(
       trackX,
       this.rail.value + entryZ,
@@ -4315,7 +4321,6 @@ export class ArchiveScene {
     const stripGain =
       this.slotUnderlights.barIntensity *
       this.overviewSlotLightGain.value *
-      lightTheme *
       THREE.MathUtils.lerp(1, 0.72, renderDetail);
     this.overviewAreaLight.position.set(
       stripX,
@@ -4337,38 +4342,23 @@ export class ArchiveScene {
       LIGHT_DETAIL_KEY_TARGET,
       renderDetail,
     );
-    this.light.color
-      .copy(DETAIL_KEY_COLOR)
-      .lerp(LIGHT_OVERVIEW_KEY_COLOR, lightTheme);
+    this.light.color.copy(LIGHT_OVERVIEW_KEY_COLOR);
     this.light.castShadow = true;
     this.light.shadow.radius = 4;
-    this.light.angle = THREE.MathUtils.lerp(0.5, 0.56, lightTheme);
-    this.light.penumbra = THREE.MathUtils.lerp(0.85, 0.96, lightTheme);
-    this.light.decay = THREE.MathUtils.lerp(1.65, 1.62, lightTheme);
-    this.light.position.lerpVectors(
-      this.detailLightPosition,
-      this.lightKeyPositionScratch,
-      lightTheme,
-    );
-    this.light.target.position.lerpVectors(
-      this.detailLightTarget,
-      this.lightKeyTargetScratch,
-      lightTheme,
-    );
-    this.light.intensity = THREE.MathUtils.lerp(
-      this.detailLightIntensity,
-      THREE.MathUtils.lerp(205, LIGHT_DETAIL_KEY_INTENSITY, renderDetail),
-      lightTheme,
-    );
+    this.light.angle = 0.56;
+    this.light.penumbra = 0.96;
+    this.light.decay = 1.62;
+    this.light.position.copy(this.lightKeyPositionScratch);
+    this.light.target.position.copy(this.lightKeyTargetScratch);
+    this.light.intensity = THREE.MathUtils.lerp(205, LIGHT_DETAIL_KEY_INTENSITY, renderDetail);
     this.overviewBottomLight.value = lightOverview;
-    this.arrayBottomLight.value = lightTheme;
 
     if (this.fixedDetailCameraHeld && this.fixedDetailCameraPose) {
       this.applyFixedDetailProjection(cameraMove);
     } else {
       this.camera.updateProjectionMatrix();
-      const projectionOverview =
-        this.fixedDetailCameraHeld ? lightTheme : lightOverview;
+      // 固定详情相机还没取到位姿的那一帧按总览投影校准。
+      const projectionOverview = this.fixedDetailCameraHeld ? 1 : lightOverview;
       // Keep the light-overview calibration in the projection matrix so camera
       // picking, coverage and WebGL rendering share one optical transform.
       this.camera.projectionMatrix.elements[0] *= THREE.MathUtils.lerp(
@@ -4408,7 +4398,6 @@ export class ArchiveScene {
     this.drawCoverage.update(this.camera);
     this.shadowCoverage?.begin();
     this.matrixUpdates ??= new InstanceUpdates(this.instances[0].instanceMatrix);
-    if (this.themeAttribute) this.themeUpdates ??= new InstanceUpdates(this.themeAttribute);
     if (this.slotLightAttribute) {
       this.slotLightUpdates ??= new InstanceUpdates(this.slotLightAttribute);
     }
@@ -4444,7 +4433,6 @@ export class ArchiveScene {
         this.hoverBadgeInstance.value = i;
         this.drawHoverBadge(fileAtCell(cell));
       }
-      this.themeUpdates?.scalar(i, this.theme.sample(cell, time));
       this.slotLightUpdates?.scalar(
         i,
         this.slotUnderlights.directFor(cell),
@@ -4487,7 +4475,6 @@ export class ArchiveScene {
     // Picking uses only the first instanced surface. The other batches disable
     // renderer culling and do not need an O(n) bound recomputation each frame.
     if (geometryChanged || countChanged || !this.instances[0].boundingSphere) this.instances[0].computeBoundingSphere();
-    this.themeUpdates?.commit();
     let neighborTop = -Infinity;
     const lane = selectedLane,
       row = selectedRow;
@@ -4591,7 +4578,7 @@ export class ArchiveScene {
       );
       state.floats(...this.camera.projectionMatrix.elements, ...this.camera.matrixWorldInverse.elements,
         ...this.camera.position.toArray(),
-        fog.near, fog.far, lightOverview, lightTheme, this.themeAmount, this.subduedIndex.value,
+        fog.near, fog.far, lightOverview,
         this.studioSkyLight.intensity, this.scene.environmentIntensity,
         this.overviewTrackOffset.value.x, this.overviewTrackOffset.value.y,
         this.overviewSlotLightGain.value,
@@ -4620,7 +4607,7 @@ export class ArchiveScene {
           mat.attenuationDistance, mat.clearcoat, mat.clearcoatRoughness,
           mat.color.r, mat.color.g, mat.color.b,
           mat.attenuationColor?.r ?? 0, mat.attenuationColor?.g ?? 0, mat.attenuationColor?.b ?? 0);
-        for (const name of ['appearance', 'glassClarity', 'themeAmount', 'subduedIndex'])
+        for (const name of ['appearance', 'glassClarity'])
           state.floats(object.userData[name]?.value ?? 0);
         const slotLight = object.userData.slotLight as
           | OverviewSlotLightUniforms
@@ -4635,7 +4622,6 @@ export class ArchiveScene {
           state.add(
             object.count,
             object.instanceMatrix.version,
-            this.themeAttribute?.version ?? 0,
             this.slotLightAttribute?.version ?? 0,
             this.neighborLightAttribute?.version ?? 0,
             this.lateralLightAttribute?.version ?? 0,
@@ -4748,8 +4734,6 @@ export class ArchiveScene {
       idleGain: this.idleGain,
       flatten: this.flatMix,
       spectrumActivity: this.playfield.bands.activity,
-      selectedIndexDim: this.model.children.find(child => surfaceRole(child.userData.surface as string) === "index")?.userData.subduedIndex?.value,
-      returningIndexDims: this.outgoing.map(o => ({ cell: o.cell, dim: o.group.children.find(child => surfaceRole(child.userData.surface as string) === "index")?.userData.subduedIndex?.value })),
       cameraDistance: this.camera.position.distanceTo(this.cameraAim),
       cameraNear: this.camera.near,
       cameraFar: this.camera.far,

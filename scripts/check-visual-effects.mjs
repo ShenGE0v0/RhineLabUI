@@ -33,7 +33,7 @@ assert.equal(effectOptions({}).parallax,false);assert.equal(effectOptions({}).tr
 assert.equal(effectOptions({huddepth:{value:Infinity}}).depth,.2);assert.equal(effectOptions({huddepth:{value:999}}).depth,1);assert.equal(effectOptions({uifroststrength:{value:-3}}).frostStrength,0);
 const pointer={},css={};let modal=0;
 const stage={dataset:{mode:'archive'},style:{setProperty:(k,v)=>css[k]=v},addEventListener:(k,fn)=>pointer[k]=fn,getBoundingClientRect:()=>({left:0,top:0,width:1000,height:800}),querySelectorAll:()=>[],querySelector:()=>({childElementCount:modal})};
-const scene={setSelectedIndexAccent(){}};const fx=new WallpaperEffects(stage,()=>scene),probe=globalThis.effectProbe;
+const scene={};const fx=new WallpaperEffects(stage,()=>scene),probe=globalThis.effectProbe;
 const props=p=>events['rhine-wallpaper-properties']({detail:Object.fromEntries(Object.entries(p).map(([k,value])=>[k,{value}]))});
 props({hudparallax:true,uifrost:true,screenfinish:true});pointer.pointermove({pointerType:'mouse',clientX:1000,clientY:0});
 for(let i=1;i<120;i++)fx.update(i/60,false);

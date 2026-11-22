@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { disposeThreeTree } from "./three-resources";
-import { themeEnvironment } from "./theme-material";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { createArchiveLighting } from "./archive-lighting";
 import { damp } from "./motion";
@@ -28,10 +27,6 @@ type ModelSource = {
   hasReveal?: boolean;
 };
 export class ModelViewer {
-  private themeAmount = 0;
-  setTheme(value: number) {
-    this.themeAmount = value;
-  }
   readonly root: HTMLElement;
   private canvasHost: HTMLElement;
   private renderer: THREE.WebGLRenderer;
@@ -642,11 +637,6 @@ export class ModelViewer {
 
   update(time: number) {
     if (!this.isOpen) return;
-    themeEnvironment(this.scene, this.renderer, this.themeAmount);
-    this.source?.model.traverse((child) => {
-      if (child.userData.themeAmount)
-        child.userData.themeAmount.value = this.themeAmount;
-    });
     const dt = Math.min(this.lastTime ? time - this.lastTime : 1 / 60, 0.05);
     this.lastTime = time;
     if (this.source) {

@@ -10,7 +10,7 @@ const close=async page=>{await page.locator('[data-action="close-modal"]').click
 const stats=page=>page.evaluate(()=>window.rhine.stats());
 try {
  const context=await browser.newContext({viewport:{width:1440,height:900},serviceWorkers:'block',reducedMotion:'reduce'});
- await context.addInitScript(()=>{if(!localStorage.getItem('rhine-settings'))localStorage.setItem('rhine-settings',JSON.stringify({reduced:false,superPerformance:true,colorTheme:'dark',music:false}));});
+ await context.addInitScript(()=>{if(!localStorage.getItem('rhine-settings'))localStorage.setItem('rhine-settings',JSON.stringify({reduced:false,superPerformance:true,music:false}));});
  const page=await context.newPage();watch(page);
  const load=async()=>{await page.waitForFunction(()=>window.rhine?.stats().ready);if(await page.locator('.entry-start').count())await page.locator('.entry-start').click();await page.waitForFunction(()=>!document.querySelector('#loading'));};
  await page.goto(process.env.REVIEW_URL||'http://127.0.0.1:5190');await load();
@@ -21,7 +21,8 @@ try {
  for(const key of keys){
   await page.locator(`[data-motion="${key}"]`).uncheck();
   const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('rhine-settings')));
-  assert.equal(saved.motion[key],false);assert.equal(saved.colorTheme,'dark');assert.equal(saved.superPerformance,true);
+  // 暗色主题已移除：prefs.colorTheme 字段不再存在，仅保留动效开关与超性能设置的持久化校验。
+  assert.equal(saved.motion[key],false);assert.equal(saved.superPerformance,true);
   assert.equal((await stats(page)).motion.preset,'custom');
   await page.locator(`[data-motion="${key}"]`).check();
  }
@@ -61,7 +62,7 @@ try {
  await page.waitForFunction(()=>document.querySelector('#inspection-marks').style.opacity==='1');
  assert.equal(await page.locator('.document-redaction-window').count(),0);
  await context.close();
- console.log('Web: 14 toggles, legacy/custom persistence, theme/performance coexistence, archive/returning frost, independent model/document reveal and viewer controls passed.');
+ console.log('Web: 14 toggles, legacy/custom persistence, super performance coexistence, archive/returning frost, independent model/document reveal and viewer controls passed.');
  const wall=await browser.newContext({viewport:{width:1440,height:900}}), wp=await wall.newPage();watch(wp);
  await wp.goto(process.env.WALLPAPER_URL||'http://127.0.0.1:5176');await wp.waitForFunction(()=>window.rhine?.stats().ready);
  const apply=values=>wp.evaluate(values=>window.wallpaperPropertyListener.applyUserProperties(Object.fromEntries(Object.entries(values).map(([key,value])=>[key,{value}]))),values);

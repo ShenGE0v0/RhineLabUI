@@ -11,6 +11,7 @@ import { superPerformanceQuality, wallpaperQuality } from "./wallpaper-quality";
 import "@kitlangton/rolling-number/styles.css";
 import "./style.css";
 import "./quality-settings.css";
+import "./decryption.css";
 import "./responsive.css";
 import { viewportLayout } from "./viewport-layout";
 import { assetUrl } from "./asset-url";
@@ -56,7 +57,6 @@ import "./wallpaper.css";
 import { Workbench } from "./workbench";
 let workbench: Workbench | undefined;
 import { ArchivePlayground } from "./archive-playground";
-import { paintTheme, themeSettingsMarkup } from "./theme-ui";
 let playground: ArchivePlayground | undefined;
 import { WallpaperEffects } from "./wallpaper-effects";
 import { WallpaperBackground } from "./wallpaper-background";
@@ -161,7 +161,6 @@ const storedPrefs = readLocal<
     quality: boolean;
     rendering: RenderQuality;
     superPerformance: boolean;
-    colorTheme: "light" | "dark";
     motion: StoredMotion;
     motionPreset: MotionPreset;
   }>
@@ -185,12 +184,10 @@ const prefs = {
     storedPrefs.rendering,
     storedPrefs.quality !== false,
   ),
-  colorTheme: storedPrefs.colorTheme === "dark" ? "dark" : "light",
 };
 const motionActive = (key: MotionKey) => motionEnabled(prefs.motion, key);
 const motionIsReduced = () =>
   Object.values(prefs.motion).every((value) => !value);
-paintTheme(prefs.colorTheme === "dark" ? 1 : 0);
 const rollingMotion = {
   duration: 460,
   motionBlur: true,
@@ -319,18 +316,6 @@ function savePrefs() {
     bookmarkFeedback?.cancel();
   }
   scene?.setMotion(prefs.motion);
-  scene?.setTheme(
-    prefs.colorTheme === "dark",
-    !motionActive("surfaceTransitions") || !started,
-  );
-  document
-    .querySelectorAll<HTMLElement>("[data-color-theme]")
-    .forEach((button) =>
-      button.setAttribute(
-        "aria-pressed",
-        String(button.dataset.colorTheme === prefs.colorTheme),
-      ),
-    );
   scene?.setSuperPerformance(superPerformanceEnabled());
   viewer?.setSuperPerformance(superPerformanceEnabled());
   scene?.setQuality(effectiveRenderQuality());
@@ -787,7 +772,7 @@ function motionPreferenceNoteMarkup() {
   return `<div id="motion-preference-note" class="motion-preference-note"><p>${motionSummary(prefs.motion)}</p><span>预设：${preset === "full" ? "完整动画" : preset === "reduced" ? "减少动画" : "自定义"} · 选择会保存在本站</span>${allEnabled ? "" : '<button data-action="enable-motion">启用完整动画</button>'}</div>`;
 }
 function settingsMarkup() {
-  return `<h2>SYSTEM SETTINGS<small>终端偏好设置</small></h2><p class="settings-intro">PUBLIC USER <span>·</span> SESSION AUTHORIZED</p>${isWallpaper ? '<p class="wallpaper-settings-note">每次启动都会读取 Wallpaper Engine 中的设置。在此修改仅对当前运行生效，无法持久保存；如需保留，请在 Wallpaper Engine 的壁纸属性中调整。</p>' : ""}<div class="settings-list">${themeSettingsMarkup(prefs.colorTheme === "dark")}${!isWallpaper ? `<label><div><strong>SUPER PERFORMANCE</strong><span>降低三维画质和渲染分辨率，保留完整动效；关闭后恢复原画质</span></div><input type="checkbox" data-pref="superPerformance" ${prefs.superPerformance ? "checked" : ""}/><i class="toggle"></i></label>` : ""}${workbench?.settingsMarkup() ?? ""}${audioSettingsMarkup(prefs)}</div>${motionPreferenceNoteMarkup()}${motionSettingsMarkup(prefs.motion, prefs.motionPreset)}${qualityMarkup(prefs.rendering)}${pwaSettingsMarkup()}<div class="settings-shortcuts">${isWallpaper ? "<span>DESKTOP CONTROLS</span><p>拖动阵列或点击界面按钮浏览档案。桌面模式下，方向键与滚轮可能无法传入壁纸。</p>" : "<span>KEYBOARD CONTROLS</span><p><kbd>←</kbd><kbd>→</kbd> 切列 <kbd>↑</kbd><kbd>↓</kbd> 选档 <kbd>ENTER</kbd> 读取 <kbd>/</kbd> 检索 <kbd>ESC</kbd> 返回</p>"}</div><div class="settings-bottom">${!isWallpaper && document.fullscreenEnabled ? '<button data-action="fullscreen">FULLSCREEN <span>↗</span></button>' : ""}</div><div class="modal-bottom"><span>ANALYSIS OS / 1.0 · 使用 MiSans 字体（小米） <a href="${assetUrl("fonts/MiSans-license.pdf")}" target="_blank" rel="noopener">字体许可</a></span><span>POWERED BY DEEPDEMOS</span></div>`;
+  return `<h2>SYSTEM SETTINGS<small>终端偏好设置</small></h2><p class="settings-intro">PUBLIC USER <span>·</span> SESSION AUTHORIZED</p>${isWallpaper ? '<p class="wallpaper-settings-note">每次启动都会读取 Wallpaper Engine 中的设置。在此修改仅对当前运行生效，无法持久保存；如需保留，请在 Wallpaper Engine 的壁纸属性中调整。</p>' : ""}<div class="settings-list">${!isWallpaper ? `<label><div><strong>SUPER PERFORMANCE</strong><span>降低三维画质和渲染分辨率，保留完整动效；关闭后恢复原画质</span></div><input type="checkbox" data-pref="superPerformance" ${prefs.superPerformance ? "checked" : ""}/><i class="toggle"></i></label>` : ""}${workbench?.settingsMarkup() ?? ""}${audioSettingsMarkup(prefs)}</div>${motionPreferenceNoteMarkup()}${motionSettingsMarkup(prefs.motion, prefs.motionPreset)}${qualityMarkup(prefs.rendering)}${pwaSettingsMarkup()}<div class="settings-shortcuts">${isWallpaper ? "<span>DESKTOP CONTROLS</span><p>拖动阵列或点击界面按钮浏览档案。桌面模式下，方向键与滚轮可能无法传入壁纸。</p>" : "<span>KEYBOARD CONTROLS</span><p><kbd>←</kbd><kbd>→</kbd> 切列 <kbd>↑</kbd><kbd>↓</kbd> 选档 <kbd>ENTER</kbd> 读取 <kbd>/</kbd> 检索 <kbd>ESC</kbd> 返回</p>"}</div><div class="settings-bottom">${!isWallpaper && document.fullscreenEnabled ? '<button data-action="fullscreen">FULLSCREEN <span>↗</span></button>' : ""}</div><div class="modal-bottom"><span>ANALYSIS OS / 1.0 · 使用 MiSans 字体（小米） <a href="${assetUrl("fonts/MiSans-license.pdf")}" target="_blank" rel="noopener">字体许可</a></span><span>POWERED BY DEEPDEMOS</span></div>`;
 }
 
 document.addEventListener("input", (e) => {
@@ -865,15 +850,6 @@ document.addEventListener("change", (e) => {
   }
 });
 document.addEventListener("click", (e) => {
-  const themeButton = (e.target as Element).closest<HTMLElement>(
-    "[data-color-theme]",
-  );
-  if (themeButton) {
-    prefs.colorTheme =
-      themeButton.dataset.colorTheme === "dark" ? "dark" : "light";
-    savePrefs();
-    return;
-  }
   if (!started) return;
   if (modalClosing) return;
   const el = (e.target as Element).closest<HTMLElement>("button");
@@ -1117,16 +1093,20 @@ function frame(ms: number) {
     requestAnimationFrame(frame);
     return;
   }
-  if (ms - lastRenderedAt < frameInterval() - 0.5) {
+  const interval = frameInterval();
+  const elapsed = ms - lastRenderedAt;
+  const tolerance = 1.5;
+  if (elapsed < interval - tolerance) {
     requestAnimationFrame(frame);
     return;
   }
-  lastRenderedAt = ms;
+  // Retain the fractional interval so the tolerance absorbs jitter without
+  // letting a faster display render every frame above the selected cap.
+  lastRenderedAt = interval > 0 && Number.isFinite(elapsed)
+    ? lastRenderedAt + Math.max(1, Math.floor((elapsed + tolerance) / interval)) * interval
+    : ms;
   workbench?.tick();
   const time = ms / 1000;
-  const theme = scene?.themeAmount ?? (prefs.colorTheme === "dark" ? 1 : 0);
-  paintTheme(theme);
-  viewer?.setTheme(theme);
   playground?.tick(time);
   wallpaperEffects?.update(
     time,
@@ -1172,9 +1152,6 @@ function frame(ms: number) {
     frameStart = ms;
     frameCount = 0;
     $("#three-scene").dataset.fps = String(Math.round(fps));
-    $("#three-scene").dataset.renderStats = JSON.stringify(
-      scene?.getStats() ?? { loaded: false, drawCalls: 0, triangles: 0 },
-    );
   }
   requestAnimationFrame(frame);
 }
@@ -1293,7 +1270,6 @@ async function toggleThree() {
     bindScene(next, resumeSelection === selected ? resumeCell : undefined);
     next.revealImmediately();
     scene = next;
-    scene.setTheme(prefs.colorTheme === "dark", true);
     scene.setArchiveCoverage(
       wallpaperHost()?.properties.archivecoverage?.value === "extra",
     );
@@ -1319,7 +1295,6 @@ async function start() {
       wallpaperHost()?.properties.load3donstartup?.value !== false
     ) {
       scene = new ArchiveScene($("#three-scene"));
-      scene.setTheme(prefs.colorTheme === "dark", true);
       scene.setArchiveCoverage(
         wallpaperHost()?.properties.archivecoverage?.value === "extra",
       );
@@ -1369,7 +1344,7 @@ function completeStartup(musicDisabled: boolean) {
   audio.releaseEntry();
   const fade = motionActive("surfaceTransitions") ? 600 : 0;
   setMode(reviewParams.get("scene") === "detail" ? "detail" : "archive");
-  // Place the grid in frame immediately and play the 5-stage overview entrance.
+  // Place the grid in frame immediately and play the 4-stage overview entrance.
   scene?.revealImmediately();
   if (reviewParams.get("scene") !== "detail") scene?.playIntro();
   $("#stage").inert = false;
@@ -1382,10 +1357,13 @@ function completeStartup(musicDisabled: boolean) {
     loading.remove();
     if (restoreFocus && (entry || !isWallpaper)) focusArchiveOverview();
   }, fade);
+  frameStart = performance.now();
+  frameCount = 0;
+  lastRenderedAt = -Infinity;
   requestAnimationFrame(frame);
-  // Do not compete with entry audio/font downloads. Full offline installation
-  // begins after startup is complete and remains atomic.
-  setTimeout(() => void initPwa(notify), 1500);
+  // Do not compete with entry audio/font downloads or the 3.2 s overview
+  // intro animation. Full offline installation begins once settled.
+  setTimeout(() => void initPwa(notify), 4500);
 }
 updateSelection();
 const customBackground = isWallpaper
@@ -1401,8 +1379,6 @@ function syncWallpaperBackground(retry = false) {
 }
 if (isWallpaper) {
   const apply = (properties: WallpaperProperties) => {
-    const theme = properties.colortheme?.value;
-    if (theme === "light" || theme === "dark") prefs.colorTheme = theme;
     scene?.setArchiveCoverage(
       properties.archivecoverage?.value === "extra" ||
         wallpaperHost()?.properties.archivecoverage?.value === "extra",

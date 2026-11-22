@@ -35,7 +35,11 @@ export async function applyPrecision(scene: ArchiveScene, tier: Precision) {
       const delta = before.boundingBox!.min.distanceTo(next.boundingBox!.min)
         + before.boundingBox!.max.distanceTo(next.boundingBox!.max);
       if (delta > .035) throw new Error(`Precision changes bounds: ${name}, ${delta}`);
-      if (array) next.setAttribute('archiveTheme', internal.themeAttribute);
+      if (array) {
+        for (const [name, attribute] of Object.entries(before.attributes)) {
+          if (attribute instanceof THREE.InstancedBufferAttribute) next.setAttribute(name, attribute);
+        }
+      }
       object.geometry = next;
       replaced.push(`${array ? 'array' : 'selected'}:${name}`);
     };

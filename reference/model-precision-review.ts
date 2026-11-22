@@ -1,6 +1,5 @@
 const tier = document.querySelector<HTMLSelectElement>('#tier')!;
 const scenario = document.querySelector<HTMLSelectElement>('#scenario')!;
-const dark = document.querySelector<HTMLInputElement>('#dark')!;
 const view = document.querySelector<HTMLIFrameElement>('#view')!;
 const note = document.querySelector('#note')!;
 const pause = document.querySelector<HTMLButtonElement>('#pause')!;
@@ -22,7 +21,7 @@ async function load() {
   }
   if (token !== generation) return;
   const b = win.bench;
-  await b.prepare(scenario.value, {dark:dark.checked});
+  await b.prepare(scenario.value);
   const geometry = (await b.sample(scenario.value, 1)).geometry;
   note.textContent = `每张背景 ${geometry.arrayTriangles.toLocaleString()} 面 · 近景 ${geometry.selectedTriangles.toLocaleString()} 面；全部使用原始画质`;
   let frame = 0, last = 0;
@@ -40,6 +39,6 @@ async function load() {
   requestAnimationFrame(tick);
 }
 const start = () => void load().catch(error => { note.textContent = String(error.message || error); });
-for (const control of [tier,scenario,dark]) control.addEventListener('change',start);
+for (const control of [tier,scenario]) control.addEventListener('change',start);
 pause.addEventListener('click',() => {paused=!paused;pause.textContent=paused?'继续':'暂停';});
 start();

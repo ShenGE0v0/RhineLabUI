@@ -17,12 +17,8 @@ try{
   }
   await page.selectOption('#scenario','inspect');
   await page.waitForFunction(()=>document.querySelector('#note').textContent.includes('1,554'),{},{timeout:60000});
-  let frame=await page.locator('#view').contentFrame();
   await page.waitForFunction(()=>document.querySelector('#view').contentWindow.bench?.scene.getStats().cameraDetail===1);
-  await page.check('#dark');
-  await page.waitForFunction(()=>document.querySelector('#note').textContent.includes('1,554'),{},{timeout:60000});
-  const dark=await page.evaluate(()=>document.querySelector('#view').contentWindow.bench.scene.scene.background.getHexString());
-  checks.push({dark});
+  // 暗色主题已移除：原暗色开关与 scene.background 底色对比断言整段删除，基准页不再提供暗色切换。
   await page.click('#pause');
   const before=await page.evaluate(()=>{const s=document.querySelector('#view').contentWindow.bench.scene.getStats();return s.renderedFrames+s.reusedFrames;});
   await page.waitForTimeout(250);

@@ -30,7 +30,7 @@ const step = () => { time += 1 / 60; scene.update(time); };
 Object.assign(window, { bench: {
   scene,
   async prepare(name: string, options: any = {}) {
-    scene.setTheme(!!options.dark, true);
+    // 暗色主题已移除：原外观主题切换调用一并删除，基准页只有亮色一种外观。
     scene.setQuality({ ...qualityPresets.original, ...options.quality });
     scene.setReduced(name === 'static');
     scene.setPlayfield(true, quietBands(), 1, name === 'static' ? 1 : 0, null, name !== 'static');

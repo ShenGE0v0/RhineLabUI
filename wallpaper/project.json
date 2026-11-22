@@ -307,22 +307,6 @@
         ],
         "condition": "desktopmode.value == 'workbench' && showgame.value == true"
       },
-      "colortheme": {
-        "order": 4,
-        "text": "界面配色",
-        "type": "combo",
-        "value": "light",
-        "options": [
-          {
-            "label": "亮色 · 磨砂白",
-            "value": "light"
-          },
-          {
-            "label": "暗色 · 石墨灰",
-            "value": "dark"
-          }
-        ]
-      },
       "rhythmstyle": {
         "order": 33,
         "text": "音乐律动方案",
@@ -531,13 +515,6 @@
         "type": "bool",
         "value": true,
         "condition": "desktopmode.value == 'workbench'"
-      },
-      "selectedindexaccent": {
-        "order": 4.5,
-        "text": "暗色模式仅选中档案标签使用强调色",
-        "type": "bool",
-        "value": false,
-        "condition": "colortheme.value == 'dark'"
       },
       "superperformance": {
         "order": 5.5,

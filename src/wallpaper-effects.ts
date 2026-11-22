@@ -85,7 +85,6 @@ export class WallpaperEffects {
       // Wallpaper pointer depth belongs exclusively to the HUD, including when
       // its switch is off. Explicit card dragging still uses the scene inputs.
       scene.uiOnlyParallax = true;
-      scene.setSelectedIndexAccent(this.props.selectedindexaccent?.value === true);
     }
     this.finish.update(options.screen && !superPerformance, options.grain, options.fringe, options.vignette, options.grainSize, time, reduced);
   }

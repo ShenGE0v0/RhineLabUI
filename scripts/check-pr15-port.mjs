@@ -1,4 +1,4 @@
-// Adapted checks from PR #15 performance.test.mjs, credited in PR15-ATTRIBUTION.md.
+// Adapted checks from PR #15 performance.test.mjs, credited in docs/PR15-ATTRIBUTION.md.
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
@@ -7,7 +7,6 @@ import {
   ArchiveShadowCoverage,
 } from "../src/archive-draw-coverage.ts";
 import { archiveWave, smooth } from "../src/motion.ts";
-import { ThemeWave } from "../src/theme-motion.ts";
 import { SharedDepthAO } from "../src/shared-depth.ts";
 test("visible edge bounds and independent offscreen shadow transforms", () => {
   const camera = new THREE.PerspectiveCamera(45, 16 / 9, 1, 100);
@@ -85,27 +84,6 @@ test("zero scan shortcut agrees with authored waveform at boundaries and long-ru
           Math.abs(archiveWave(row, lane, time) - original(row, lane, time)) <
             1e-14,
         );
-});
-test("settled theme shortcut preserves mid-transition reversal and newly visible cells", () => {
-  const wave = new ThemeWave(),
-    origin = { row: 12, lane: 2 },
-    distant = { row: 120, lane: 9 };
-  wave.set(true, 10, origin);
-  wave.beginFrame();
-  const near = wave.sample(origin, 10.4),
-    far = wave.sample(distant, 10.4);
-  assert.ok(near > far);
-  wave.set(false, 10.4, origin);
-  assert.equal(wave.sample(origin, 10.4), near);
-  assert.equal(wave.sample(distant, 10.4), far);
-  wave.beginFrame();
-  assert.equal(wave.sample(origin, 12), 0);
-  assert.equal(wave.sample(distant, 12), 0);
-  wave.set(true, 12, origin);
-  wave.beginFrame();
-  assert.equal(wave.sample(distant, 14), 1);
-  wave.set(false, 14, origin);
-  assert.equal(wave.sample({ row: -300, lane: -20 }, 14), 1);
 });
 test("AO depth-buffer removal preserves normal depth and shared packed Bokeh depth", () => {
   const pass = new SharedDepthAO(

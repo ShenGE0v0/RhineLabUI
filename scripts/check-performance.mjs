@@ -20,7 +20,7 @@ const results = [], errors = [];
 try {
   for(const scenario of (process.env.PERF_CASES || 'static,idle,navigate,detail,music').split(',')) {
     const name = scenario.split('-')[0];
-    const options = {dark:scenario.includes('dark'),rhythm:scenario.includes('wave')?'wave':scenario.includes('flow')?'lift':'legacy',quality:{}};
+    const options = {rhythm:scenario.includes('wave')?'wave':scenario.includes('flow')?'lift':'legacy',quality:{}};
     if(scenario.includes('half')) options.quality.aoResolution=.5;
     if(scenario.includes('noao')) options.quality.aoSamples=0;
     if(scenario.includes('nodof')) options.quality.depthOfField=0;

@@ -9,7 +9,7 @@ const props=p=>w().wallpaperPropertyListener?.applyUserProperties(Object.fromEnt
 function fit(){const scale=Math.min((innerWidth-20)/size[0],(innerHeight-260)/size[1]);f.style.width=size[0]+'px';f.style.height=size[1]+'px';f.style.transform=`scale(${scale})`;view.style.width=size[0]*scale+'px';view.style.height=size[1]*scale+'px'}fit();window.onresize=fit;
 const until=async fn=>{for(let i=0;i<50&&!fn();i++)await wait(100)};
 const assert=(ok,label)=>{result.textContent+=(ok?'PASS ':'FAIL ')+label+'\n';if(!ok)throw Error(label)};
-f.onload=async()=>{while(!w().rhine?.stats().ready)await wait(100);props({desktopmode:'workbench',sound:false,music:false,reduced:false,colortheme:'dark',showgame:true,audioreactive:true,selectionstyle:'flat',idlebreathing:false});w().rhine.archive()};
+f.onload=async()=>{while(!w().rhine?.stats().ready)await wait(100);props({desktopmode:'workbench',sound:false,music:false,reduced:false,showgame:true,audioreactive:true,selectionstyle:'flat',idlebreathing:false});w().rhine.archive()};
 document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>props({desktopmode:b.dataset.mode}));
 document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{size=b.dataset.size.split(',').map(Number);fit()});
 document.querySelectorAll('[data-rhythm]').forEach(b=>b.onclick=()=>props({rhythmstyle:b.dataset.rhythm}));
@@ -18,7 +18,7 @@ document.querySelector('#freeze').onclick=()=>w().wallpaperPropertyListener.setP
 document.querySelector('#game').onclick=()=>d().querySelector('.relay-entry').click();
 setInterval(()=>{if(!w().rhine)return;const t=w().performance.now()/1000;w().rhineWallpaperSpectrum={samples:Array.from({length:128},(_,i)=>{const key=i%64<8?'low':i%64<32?'mid':'high';return band===key?.45:band==='all'?.25+.18*Math.sin(t*(key==='low'?2:key==='mid'?3:5)):0}),time:t};const s=w().rhine.stats();document.querySelector('#status').textContent=JSON.stringify({size,mode:s.mode,drawn:s.archiveCount,candidates:s.archiveCandidates,layout:d().querySelector('#stage')?.dataset.layout,band})},100);
 document.querySelector('#test').onclick=async()=>{result.textContent='';try{
- props({desktopmode:'workbench',reduced:false,colortheme:'dark'});w().rhine.archive();await wait(1000);
+ props({desktopmode:'workbench',reduced:false});w().rhine.archive();await wait(1000);
  assert(!d().querySelector('.wb-content').textContent.includes('跟随本机'),'移除时区说明');
  w().rhineWallpaperMedia={status:{enabled:true},properties:{title:'回归测试曲目',artist:'测试'},playing:true};w().dispatchEvent(new (w().Event)('rhine-wallpaper-media'));d().querySelector('[data-wb-lane="3"]').click();
  assert(!d().querySelector('.wb-content').textContent.includes('未提供进度'),'无进度时不显示说明');

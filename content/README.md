@@ -1,36 +1,47 @@
 # 修改档案内容
 
-[`archives.json`](archives.json) 是页面与 TXT 下载共用的档案数据。修改内容无需编辑 TypeScript；`src/data.ts` 只保留类型和阵列位置映射。
+[`archives.json`](archives.json) 是三维卡面、网页检索、详情面板与 TXT 下载共用的唯一档案数据源。日常更新或新增内容无需修改 TypeScript（`src/data.ts` 只负责类型定义与阵列位置映射）。
 
 ## 文件结构
 
-- `categories`：检索筛选器的五个分类，按显示顺序排列。“全部档案”由界面添加，无需填写。
-- `columns`：三维阵列从左到右的五个分类。与 `categories` 包含相同名称，顺序可以不同。
-- `records`：四十份档案，按 `X-001` 至 `X-040` 排列。每个分类必须恰好有八份，同分类在数组中的顺序决定列内顺序。
+- `categories`：检索筛选器的五个分类，按显示顺序排列。“全部档案”由界面自动添加，无需填写。
+- `columns`：三维阵列从左到右对应的五个分类，必须与 `categories` 包含相同的五个名称（顺序可不同）。
+- `records`：固定四十份档案，按 `X-001` 至 `X-040` 顺序排列。每个分类下必须恰好有八份，同分类在数组中的顺序决定列内顺序。
 
-| 字段                        | 内容                                                        |
-| --------------------------- | ----------------------------------------------------------- |
-| `id`                        | 稳定编号，用于收藏、定位和下载文件名                        |
-| `title`、`en`               | 中文标题、英文标题                                          |
-| `department`、`category`    | 科室、所属分类；分类须与上面的名称完全一致                  |
-| `date`、`lead`、`clearance` | 编目范围、相关人物、访问范围；`RESTRICTED` 对应目录访问状态 |
-| `abstract`                  | 摘要                                                        |
-| `findings`                  | 至少一条研究记录，使用字符串数组                            |
-| `source`                    | 设定参考的完整 HTTP 或 HTTPS 链接                           |
+### 档案字段说明
 
-以上字段均必填，文本不能只包含空白。所有内容按纯文本显示，不支持 Markdown 或 HTML；引号按 JSON 规则写为 `\"`，换行写为 `\n`。页面会转义 HTML 特殊字符，TXT 下载保留原文。保留公开设定的来源，区分档案式改写与游戏原文。
+| 字段 | 必填 | 内容说明 |
+| --- | --- | --- |
+| `id` | 是 | 稳定编号（`X-001`～`X-040`），用于收藏映射、阵列定位与 TXT 下载文件名 |
+| `title` | 是 | 中文作品标题（显示于卡面左上首行、悬停卡面及详情） |
+| `en` | 是 | 生成模型名（显示于卡面左上第二行，并用于匹配 `public/assets/model-providers/` 厂商图标） |
+| `department` | 是 | 来源／平台标注（如 `DSH`、`未标注`） |
+| `category` | 是 | 所属分类（须与 `categories` 中的五个名称之一完全一致） |
+| `date` | 是 | 收录／刻录日期（推荐 `YYYY-MM-DD` 格式，卡面右上角显示为 `刻录时间：YYYY-MM-DD` 并由 `src/code39.ts` 绘成 Code 39 条码） |
+| `lead` | 是 | 原作作者名 |
+| `clearance` | 是 | 作品类型（如 `WEB`） |
+| `abstract` | 是 | 作品简介 |
+| `findings` | 是 | 补充说明字符串数组（至少包含一条非空文本） |
+| `source` | 是 | DeepDemos 作品原页完整 HTTP 或 HTTPS 链接 |
+| `cover` | 否 | DeepDemos 作品封面图 URL（加载后裁切铺入卡面中部展示框） |
+| `stats` | 否 | 互动数据快照对象：`{ "sample": "5.0 / 5 · n=11", "downloads": 32, "comments": 0 }`（不包含浏览数；缺省时卡面回退默认值） |
 
-当前卡面的可选字段 `cover` 和 `stats` 取自 DeepDemos 的公开作品数据，按每条 `source` 的作品 ID 匹配。封面加载自原站。评分、样本数、下载数和评论数为 2026-11-22 的快照。
+> 所有文本字段按**纯文本**渲染，不支持 Markdown 或 HTML；双引号按 JSON 规则转义为 `\"`，换行写为 `\n`。页面渲染会自动转义 HTML 特殊字符，TXT 导出保留纯文本原文。
 
-## 修改与验证
+当前 40 份档案的 `cover` 与 `stats` 已按每条 `source` 的作品 ID 对齐 DeepDemos 公开数据（2026-11-22 快照）。
 
-1. 编辑 JSON 中对应档案的字段。修改分类名称时，同时更新 `categories`、`columns` 和各档案的 `category`。
-2. 执行 `npm run export:archives`，校验数据并更新 `public/archives/` 中的下载文件。校验失败时不会写入任何下载文件。
-3. 执行 `npm run check:content` 检查校验规则与下载一致性，再运行 `npm run build` 验证构建。将 JSON 与更新后的 TXT 一起提交。
-4. 在 `npm run dev` 中查看标题、详情、检索和下载结果，尤其检查长标题与较长正文的实际布局。
+## 修改与校验流程
 
-`npm run dev` 启动前和 `npm run build` 构建前都会自动校验并导出。开发服务器运行期间，JSON 修改会更新页面；下载文件需再次执行 `npm run export:archives` 或重启开发服务器。
+1. 编辑 `content/archives.json` 中对应档案的字段。若修改分类名称，需同步更新 `categories`、`columns` 与对应档案的 `category`。
+2. 执行 `npm run export:archives`，校验 JSON 约束并重新生成 `public/archives/DEEPDEMOS-X-001.txt` 至 `DEEPDEMOS-X-040.txt`。若校验失败，脚本会拒绝写入任何文件。
+3. 执行 `npm run check:content` 核验字段约束与 TXT 导出一致性，随后运行 `npm run build` 验证完整构建。
+4. 在 `npm run dev` 中实机查看卡面标题、模型图标、封面加载、刻录条码、`/` 检索与 TXT 导出结果。
 
-当前五列、每列八份与原片布局、循环阵列相连。校验会拒绝增减档案或改变分类数量；调整这些数量需要另行修改阵列逻辑。不要通过交换或重编号档案改变顺序，以免已有收藏指向不同内容。校验可以检查编号格式与排列，无法判断改写后是否仍是原来那份档案。
+`npm run dev` 和 `npm run build` 启动前均会自动执行 `export-records.mjs`。开发服务器运行期间修改 `archives.json` 会即时刷新页面内容，但更新磁盘 TXT 需手动执行 `npm run export:archives` 或重启开发服务器。
 
-内容分离的建议来自 [@Tomahawkd 的 PR #3](https://github.com/LBEILC/RhineLabUI/pull/3)。此实现仅拆分当前项目的档案数据、校验和导出。
+## 结构红线
+
+- 五列、每列八份的结构与三维循环阵列及布局强绑定，`scripts/archive-content.mjs` 会拒绝增减档案或更改分类数量。
+- 请勿通过交换数组位置或重编号改变已有档案顺序，以免用户本地保存的收藏编号指向错误作品。
+
+内容与数据分离方案最初源自 [@Tomahawkd 的 PR #3](https://github.com/LBEILC/RhineLabUI/pull/3)。

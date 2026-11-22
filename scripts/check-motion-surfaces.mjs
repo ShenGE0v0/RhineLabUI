@@ -17,8 +17,9 @@ const closeSettings = async page => {
 };
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' });
+  // 暗色主题已移除：prefs 不再有 colorTheme 字段，亮色暖焦糖是唯一主题。
   await context.addInitScript(() => localStorage.setItem('rhine-settings', JSON.stringify({
-    music: false, superPerformance: true, colorTheme: 'dark',
+    music: false, superPerformance: true,
     motion: { boot: false, surfaceTransitions: false, detailTransition: true, modelDecryption: false, documentReveal: false },
   })));
   const page = await context.newPage(); watch(page);
@@ -38,7 +39,7 @@ try {
   });
   assert.ok(report.contrast.every(item => item.ratio >= 4.5), JSON.stringify(report.contrast));
   await mkdir('.tools/motion-surfaces', { recursive: true });
-  await page.locator('.motion-settings-head').screenshot({ path: testScreenshotPath('motion-surfaces', 'dark-controls.png') });
+  await page.locator('.motion-settings-head').screenshot({ path: testScreenshotPath('motion-surfaces', 'light-controls.png') });
   await closeSettings(page);
   const entry = await page.evaluate(() => {
     window.rhine.detail();
@@ -117,5 +118,5 @@ try {
   await wall.close();
   assert.deepEqual(errors, []);
   await writeFile('.tools/motion-surfaces/report.json', JSON.stringify(report, null, 2));
-  console.log('Passed: independent UI/3D transitions, dark text contrast, interrupted viewer enter/exit, focus restoration and immediate reopen; no page errors.');
+  console.log('Passed: independent UI/3D transitions, light text contrast, interrupted viewer enter/exit, focus restoration and immediate reopen; no page errors.');
 } finally { await browser.close(); }

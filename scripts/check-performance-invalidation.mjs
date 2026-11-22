@@ -12,7 +12,6 @@ try{
   const check=(name,change)=>{const before=scene.getStats().renderedFrames;change();bench.draw();results.push({name,rendered:scene.getStats().renderedFrames>before});};
   check('unchanged',()=>{});
   check('resize',()=>scene.resize());
-  check('theme',()=>scene.setTheme(true,true));
   check('selection',()=>scene.select(7));
   await bench.prepare('static');
   check('late label texture',()=>{scene.labelTexture.needsUpdate=true;});
