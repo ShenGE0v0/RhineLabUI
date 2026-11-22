@@ -1339,8 +1339,9 @@ async function start() {
     ]);
     if (scene) bindScene(scene);
     savePrefs();
-    ready = true;
     select(0);
+    if (reviewParams.get("scene") !== "detail") await scene?.warmUpOverview();
+    ready = true;
     if (entry) entry.ready();
     else {
       if (isWallpaper) {

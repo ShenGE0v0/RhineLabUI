@@ -27,7 +27,13 @@
       "findings": [
         "生成模型：CLAUDE-SONNET-5.5"
       ],
-      "source": "https://deepdemos.top/demo/demo-98003103"
+      "source": "https://deepdemos.top/demo/demo-98003103",
+      "cover": "https://deepdemos.top/media/covers/7bd49dfade10470ca29a495e820b7b00.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=11",
+        "downloads": 32,
+        "comments": 0
+      }
     },
     {
       "id": "X-002",
@@ -42,7 +48,13 @@
       "findings": [
         "生成模型：V4.1FLASH0908"
       ],
-      "source": "https://deepdemos.top/demo/demo-f23ab4e1"
+      "source": "https://deepdemos.top/demo/demo-f23ab4e1",
+      "cover": "https://deepdemos.top/media/covers/a515e0c8764047ff862e96458dfe238d.webp",
+      "stats": {
+        "sample": "4.8 / 5 · n=4",
+        "downloads": 12,
+        "comments": 0
+      }
     },
     {
       "id": "X-003",
@@ -59,7 +71,13 @@
         "使用平台：DSH",
         "题材：动画"
       ],
-      "source": "https://deepdemos.top/demo/svg-7ee98da1"
+      "source": "https://deepdemos.top/demo/svg-7ee98da1",
+      "cover": "https://deepdemos.top/media/covers/c75fa62feac543438c949081a1b8def8.webp",
+      "stats": {
+        "sample": "3.7 / 5 · n=3",
+        "downloads": 6,
+        "comments": 0
+      }
     },
     {
       "id": "X-004",
@@ -75,7 +93,13 @@
         "生成模型：DSV41F1017",
         "题材：3D建模"
       ],
-      "source": "https://deepdemos.top/demo/demo-c15fb92c"
+      "source": "https://deepdemos.top/demo/demo-c15fb92c",
+      "cover": "https://deepdemos.top/media/covers/7af56cbcda854f0699f3c54b13f13894.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=2",
+        "downloads": 9,
+        "comments": 0
+      }
     },
     {
       "id": "X-005",
@@ -90,7 +114,13 @@
       "findings": [
         "题材：动画"
       ],
-      "source": "https://deepdemos.top/demo/deepseek-e82e6fad"
+      "source": "https://deepdemos.top/demo/deepseek-e82e6fad",
+      "cover": "https://deepdemos.top/media/covers/ee1cdbea05cf49f6ab0dadae6c04da30.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=10",
+        "downloads": 9,
+        "comments": 1
+      }
     },
     {
       "id": "X-006",
@@ -106,7 +136,13 @@
         "生成模型：DSV41F1017",
         "使用平台：workbuddy"
       ],
-      "source": "https://deepdemos.top/demo/demo-2313a676"
+      "source": "https://deepdemos.top/demo/demo-2313a676",
+      "cover": "https://deepdemos.top/media/covers/fc881f959f2842579b6cc48ea0036db4.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=11",
+        "downloads": 18,
+        "comments": 0
+      }
     },
     {
       "id": "X-007",
@@ -121,7 +157,13 @@
       "findings": [
         "生成模型：GPT-ASTRA"
       ],
-      "source": "https://deepdemos.top/demo/demo-bf7bbfe3"
+      "source": "https://deepdemos.top/demo/demo-bf7bbfe3",
+      "cover": "https://deepdemos.top/media/covers/df845cec4b5143458b0ae30afb09193d.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=15",
+        "downloads": 129,
+        "comments": 0
+      }
     },
     {
       "id": "X-008",
@@ -138,7 +180,13 @@
         "使用平台：DSH",
         "题材：图形学"
       ],
-      "source": "https://deepdemos.top/demo/demo-f36c6837"
+      "source": "https://deepdemos.top/demo/demo-f36c6837",
+      "cover": "https://deepdemos.top/media/covers/1531bb3283d34d718c0ddf66e5fdf996.webp",
+      "stats": {
+        "sample": "4.9 / 5 · n=13",
+        "downloads": 47,
+        "comments": 0
+      }
     },
     {
       "id": "X-009",
@@ -153,7 +201,13 @@
       "findings": [
         "生成模型：DSV41F1017"
       ],
-      "source": "https://deepdemos.top/demo/voxel-042aea8a"
+      "source": "https://deepdemos.top/demo/voxel-042aea8a",
+      "cover": "https://deepdemos.top/media/covers/9e439687a56f4c7ab83454b82e4f8f6c.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=7",
+        "downloads": 9,
+        "comments": 0
+      }
     },
     {
       "id": "X-010",
@@ -169,7 +223,13 @@
         "生成模型：FABLE5.1",
         "题材：3D建模"
       ],
-      "source": "https://deepdemos.top/demo/claude-fable-5-1-three-js-2da3c8a8"
+      "source": "https://deepdemos.top/demo/claude-fable-5-1-three-js-2da3c8a8",
+      "cover": "https://deepdemos.top/media/covers/c4c76fab3aac4a6a8bcd463d2bd59312.webp",
+      "stats": {
+        "sample": "4.5 / 5 · n=4",
+        "downloads": 4,
+        "comments": 0
+      }
     },
     {
       "id": "X-011",
@@ -184,7 +244,13 @@
       "findings": [
         "题材：3D建模"
       ],
-      "source": "https://deepdemos.top/demo/demo-c33badd6"
+      "source": "https://deepdemos.top/demo/demo-c33badd6",
+      "cover": "https://deepdemos.top/media/covers/4a8d9fa3a9014f75ac07cb18ed40bcdb.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=1",
+        "downloads": 38,
+        "comments": 0
+      }
     },
     {
       "id": "X-012",
@@ -200,7 +266,13 @@
         "生成模型：GROK4.7",
         "题材：3D建模"
       ],
-      "source": "https://deepdemos.top/demo/grok4-7-b1669ce6"
+      "source": "https://deepdemos.top/demo/grok4-7-b1669ce6",
+      "cover": "https://deepdemos.top/media/covers/d8a9afca01cf48638b517070dbb9a924.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=4",
+        "downloads": 6,
+        "comments": 0
+      }
     },
     {
       "id": "X-013",
@@ -217,7 +289,13 @@
         "使用平台：DSH",
         "题材：3D建模"
       ],
-      "source": "https://deepdemos.top/demo/mbt-x-9e2743aa"
+      "source": "https://deepdemos.top/demo/mbt-x-9e2743aa",
+      "cover": "https://deepdemos.top/media/covers/1debd84e1959418291ac90b33705ff5b.webp",
+      "stats": {
+        "sample": "3.0 / 5 · n=2",
+        "downloads": 16,
+        "comments": 0
+      }
     },
     {
       "id": "X-014",
@@ -233,7 +311,13 @@
         "生成模型：GPT-ASTRA",
         "题材：3D建模"
       ],
-      "source": "https://deepdemos.top/demo/gpt-6-astra-max-016418d4"
+      "source": "https://deepdemos.top/demo/gpt-6-astra-max-016418d4",
+      "cover": "https://deepdemos.top/media/covers/2e5f2b1a43e04f60b75fb03ccea0fd51.webp",
+      "stats": {
+        "sample": "4.5 / 5 · n=2",
+        "downloads": 9,
+        "comments": 0
+      }
     },
     {
       "id": "X-015",
@@ -251,7 +335,13 @@
         "生成轮数：5",
         "题材：3D建模"
       ],
-      "source": "https://deepdemos.top/demo/3d-5def8d47"
+      "source": "https://deepdemos.top/demo/3d-5def8d47",
+      "cover": "https://deepdemos.top/media/covers/a1f49106365b4bfabbffd0403a466e4f.webp",
+      "stats": {
+        "sample": "3.7 / 5 · n=3",
+        "downloads": 13,
+        "comments": 0
+      }
     },
     {
       "id": "X-016",
@@ -267,7 +357,13 @@
         "使用平台：DSH",
         "生成轮数：1"
       ],
-      "source": "https://deepdemos.top/demo/demo-175821cf"
+      "source": "https://deepdemos.top/demo/demo-175821cf",
+      "cover": "https://deepdemos.top/media/covers/cb1b67e5cce546fabf6c34858097a7f1.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=11",
+        "downloads": 23,
+        "comments": 0
+      }
     },
     {
       "id": "X-017",
@@ -283,7 +379,13 @@
         "生成轮数：3",
         "题材：3D建模 / 仿真"
       ],
-      "source": "https://deepdemos.top/demo/3d-f3a0550f"
+      "source": "https://deepdemos.top/demo/3d-f3a0550f",
+      "cover": "https://deepdemos.top/media/covers/12e40d0b30984017aa641ba3005efca9.webp",
+      "stats": {
+        "sample": "4.7 / 5 · n=7",
+        "downloads": 160,
+        "comments": 0
+      }
     },
     {
       "id": "X-018",
@@ -298,7 +400,13 @@
       "findings": [
         "生成模型：V4.1FLASH"
       ],
-      "source": "https://deepdemos.top/demo/demo-9d4bf142"
+      "source": "https://deepdemos.top/demo/demo-9d4bf142",
+      "cover": "https://deepdemos.top/media/covers/f353649079114ee78a53301869155a01.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=9",
+        "downloads": 67,
+        "comments": 0
+      }
     },
     {
       "id": "X-019",
@@ -315,7 +423,13 @@
         "使用平台：Codex",
         "题材：图形学 / 动画"
       ],
-      "source": "https://deepdemos.top/demo/gpt-7f44a965"
+      "source": "https://deepdemos.top/demo/gpt-7f44a965",
+      "cover": "https://deepdemos.top/media/covers/31a6c10aa627486c8304e16653298505.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=16",
+        "downloads": 192,
+        "comments": 0
+      }
     },
     {
       "id": "X-020",
@@ -331,7 +445,13 @@
         "生成模型：GLM5.3FLASH",
         "使用平台：Zcode"
       ],
-      "source": "https://deepdemos.top/demo/demo-86d62c47"
+      "source": "https://deepdemos.top/demo/demo-86d62c47",
+      "cover": "https://deepdemos.top/media/covers/31f7dba866604aaf8a7c9f679a788714.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=1",
+        "downloads": 10,
+        "comments": 0
+      }
     },
     {
       "id": "X-021",
@@ -347,7 +467,13 @@
         "生成模型：V4.1FLASH0908",
         "使用平台：DSH"
       ],
-      "source": "https://deepdemos.top/demo/asmr-3d-95a655f8"
+      "source": "https://deepdemos.top/demo/asmr-3d-95a655f8",
+      "cover": "https://deepdemos.top/media/covers/7c26bc3765884237b4b4bd81d634e436.webp",
+      "stats": {
+        "sample": "3.0 / 5 · n=2",
+        "downloads": 5,
+        "comments": 0
+      }
     },
     {
       "id": "X-022",
@@ -362,7 +488,13 @@
       "findings": [
         "生成模型：DEEPSEEK-V4-FLASH"
       ],
-      "source": "https://deepdemos.top/demo/demo-9f720a44"
+      "source": "https://deepdemos.top/demo/demo-9f720a44",
+      "cover": "https://deepdemos.top/media/covers/default.svg",
+      "stats": {
+        "sample": "暂无评分 · n=0",
+        "downloads": 0,
+        "comments": 0
+      }
     },
     {
       "id": "X-023",
@@ -378,7 +510,13 @@
         "生成轮数：2",
         "题材：图形学 / 3D建模"
       ],
-      "source": "https://deepdemos.top/demo/demo-5fc293da"
+      "source": "https://deepdemos.top/demo/demo-5fc293da",
+      "cover": "https://deepdemos.top/media/covers/4bb5fb5614134a3d89ee980aaacb8af4.webp",
+      "stats": {
+        "sample": "4.7 / 5 · n=3",
+        "downloads": 40,
+        "comments": 3
+      }
     },
     {
       "id": "X-024",
@@ -393,7 +531,13 @@
       "findings": [
         "生成轮数：1"
       ],
-      "source": "https://deepdemos.top/demo/0831-0e4232c5"
+      "source": "https://deepdemos.top/demo/0831-0e4232c5",
+      "cover": "https://deepdemos.top/media/covers/87c287ae70f24d6581276d9900347482.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=5",
+        "downloads": 11,
+        "comments": 0
+      }
     },
     {
       "id": "X-025",
@@ -408,7 +552,13 @@
       "findings": [
         "题材：图形学 / 仿真"
       ],
-      "source": "https://deepdemos.top/demo/demo-b5809b4a"
+      "source": "https://deepdemos.top/demo/demo-b5809b4a",
+      "cover": "https://deepdemos.top/media/covers/d91d89df6f704f918f0e5ae560c5c861.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=9",
+        "downloads": 40,
+        "comments": 0
+      }
     },
     {
       "id": "X-026",
@@ -424,7 +574,13 @@
         "生成模型：V4.1FLASH",
         "题材：仿真"
       ],
-      "source": "https://deepdemos.top/demo/esp32-3d-893d044e"
+      "source": "https://deepdemos.top/demo/esp32-3d-893d044e",
+      "cover": "https://deepdemos.top/media/covers/05070527a27c479296309477316d784b.webp",
+      "stats": {
+        "sample": "3.8 / 5 · n=11",
+        "downloads": 15,
+        "comments": 0
+      }
     },
     {
       "id": "X-027",
@@ -439,7 +595,13 @@
       "findings": [
         "使用平台：DSH"
       ],
-      "source": "https://deepdemos.top/demo/apfsds-_-161665fc"
+      "source": "https://deepdemos.top/demo/apfsds-_-161665fc",
+      "cover": "https://deepdemos.top/media/covers/907bdaa411064990af70f1df93d6f83f.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=3",
+        "downloads": 11,
+        "comments": 3
+      }
     },
     {
       "id": "X-028",
@@ -456,7 +618,13 @@
         "使用平台：DSH",
         "题材：仿真"
       ],
-      "source": "https://deepdemos.top/demo/3d-b115d824"
+      "source": "https://deepdemos.top/demo/3d-b115d824",
+      "cover": "https://deepdemos.top/media/covers/376e15456b8a4305b0182e2fcdf1527d.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=3",
+        "downloads": 6,
+        "comments": 1
+      }
     },
     {
       "id": "X-029",
@@ -474,7 +642,13 @@
         "生成轮数：1",
         "题材：仿真"
       ],
-      "source": "https://deepdemos.top/demo/demo-af996002"
+      "source": "https://deepdemos.top/demo/demo-af996002",
+      "cover": "https://deepdemos.top/media/covers/268ee7b8fceb460f8a826d2606693a35.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=4",
+        "downloads": 7,
+        "comments": 0
+      }
     },
     {
       "id": "X-030",
@@ -491,7 +665,13 @@
         "使用平台：Zcode",
         "题材：仿真"
       ],
-      "source": "https://deepdemos.top/demo/demo-05200b77"
+      "source": "https://deepdemos.top/demo/demo-05200b77",
+      "cover": "https://deepdemos.top/media/covers/3aa50394c26d444e96ab92fe019d5b35.webp",
+      "stats": {
+        "sample": "3.3 / 5 · n=3",
+        "downloads": 17,
+        "comments": 0
+      }
     },
     {
       "id": "X-031",
@@ -506,7 +686,13 @@
       "findings": [
         "题材：图形学"
       ],
-      "source": "https://deepdemos.top/demo/demo-369a5f94"
+      "source": "https://deepdemos.top/demo/demo-369a5f94",
+      "cover": "https://deepdemos.top/media/covers/b36e7d1109bb4154a631ab8deb6118c8.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=2",
+        "downloads": 28,
+        "comments": 0
+      }
     },
     {
       "id": "X-032",
@@ -521,7 +707,13 @@
       "findings": [
         "题材：仿真"
       ],
-      "source": "https://deepdemos.top/demo/demo-8d062fdf"
+      "source": "https://deepdemos.top/demo/demo-8d062fdf",
+      "cover": "https://deepdemos.top/media/covers/cbd9bc5e8e5242a4b156c7af5d7057e5.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=1",
+        "downloads": 22,
+        "comments": 0
+      }
     },
     {
       "id": "X-033",
@@ -536,7 +728,13 @@
       "findings": [
         "生成模型：HY4"
       ],
-      "source": "https://deepdemos.top/demo/cs-fps-40c092a9"
+      "source": "https://deepdemos.top/demo/cs-fps-40c092a9",
+      "cover": "https://deepdemos.top/media/covers/a57f46b4458648d68d2d47871e828129.webp",
+      "stats": {
+        "sample": "4.5 / 5 · n=13",
+        "downloads": 110,
+        "comments": 0
+      }
     },
     {
       "id": "X-034",
@@ -552,7 +750,13 @@
         "生成轮数：1",
         "题材：3D建模 / 仿真"
       ],
-      "source": "https://deepdemos.top/demo/demo-06304b5d"
+      "source": "https://deepdemos.top/demo/demo-06304b5d",
+      "cover": "https://deepdemos.top/media/covers/d93077c17f9c4c54a5f7e1773f776c46.webp",
+      "stats": {
+        "sample": "4.8 / 5 · n=16",
+        "downloads": 62,
+        "comments": 0
+      }
     },
     {
       "id": "X-035",
@@ -568,7 +772,13 @@
         "生成模型：DS-FV-0831",
         "使用平台：DSH"
       ],
-      "source": "https://deepdemos.top/demo/demo-4efa6081"
+      "source": "https://deepdemos.top/demo/demo-4efa6081",
+      "cover": "https://deepdemos.top/media/covers/dccf266d2e8d4f1d884581aa694c9ce1.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=22",
+        "downloads": 88,
+        "comments": 0
+      }
     },
     {
       "id": "X-036",
@@ -585,7 +795,13 @@
         "生成轮数：1",
         "题材：3D建模 / 仿真"
       ],
-      "source": "https://deepdemos.top/demo/demo-6558a0fe"
+      "source": "https://deepdemos.top/demo/demo-6558a0fe",
+      "cover": "https://deepdemos.top/media/covers/29d4feddb0ae492b840f4583e4eda09b.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=9",
+        "downloads": 71,
+        "comments": 0
+      }
     },
     {
       "id": "X-037",
@@ -602,7 +818,13 @@
         "使用平台：DSH",
         "生成轮数：7"
       ],
-      "source": "https://deepdemos.top/demo/demo-6b49a30c"
+      "source": "https://deepdemos.top/demo/demo-6b49a30c",
+      "cover": "https://deepdemos.top/media/covers/ca080b62253943859a4a5173a4d58614.webp",
+      "stats": {
+        "sample": "3.9 / 5 · n=13",
+        "downloads": 208,
+        "comments": 0
+      }
     },
     {
       "id": "X-038",
@@ -617,7 +839,13 @@
       "findings": [
         "匿名上传，未标注生成信息"
       ],
-      "source": "https://deepdemos.top/demo/demo-ce927755"
+      "source": "https://deepdemos.top/demo/demo-ce927755",
+      "cover": "https://deepdemos.top/media/covers/09e26dfc0fc9464295e71482cb07a67e.webp",
+      "stats": {
+        "sample": "4.8 / 5 · n=9",
+        "downloads": 75,
+        "comments": 0
+      }
     },
     {
       "id": "X-039",
@@ -632,7 +860,13 @@
       "findings": [
         "题材：仿真"
       ],
-      "source": "https://deepdemos.top/demo/3d-2153cd8d"
+      "source": "https://deepdemos.top/demo/3d-2153cd8d",
+      "cover": "https://deepdemos.top/media/covers/5d8be52197fc4038a373e18dbb97bafd.webp",
+      "stats": {
+        "sample": "5.0 / 5 · n=7",
+        "downloads": 65,
+        "comments": 0
+      }
     },
     {
       "id": "X-040",
@@ -647,7 +881,13 @@
       "findings": [
         "匿名上传，未标注生成信息"
       ],
-      "source": "https://deepdemos.top/demo/ironfall-2-2-2-47a2dc94"
+      "source": "https://deepdemos.top/demo/ironfall-2-2-2-47a2dc94",
+      "cover": "https://deepdemos.top/media/covers/297f59b419024a11aa65f935cade23da.webp",
+      "stats": {
+        "sample": "3.2 / 5 · n=9",
+        "downloads": 18,
+        "comments": 0
+      }
     }
   ]
 }

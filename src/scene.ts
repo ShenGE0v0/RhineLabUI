@@ -374,44 +374,51 @@ const COLUMN_SWITCH_WAVE_WIDTH = 2.1;
 const COLUMN_SWITCH_WAVE_AMPLITUDE = 0.85;
 const OVERVIEW_RIGHT_X = Math.cos(OVERVIEW_AZIMUTH);
 const OVERVIEW_RIGHT_Z = Math.sin(OVERVIEW_AZIMUTH);
-// The swell raises the slot to its terrace. The selected file then rises
-// from that height, while the amber bar follows its own timing.
-const INTRO_FLAT_HOLD = 0.45;
+// 5-stage overview entrance: flat hold -> right-to-left wave raising the
+// terrace -> pre-select slight lift -> amber bar glide from left-back ->
+// full lift unlock once the bar reaches the selected slot.
+const INTRO_FLAT_HOLD = 0.5;
 const INTRO_WAVE_START = 9.5;
 const INTRO_WAVE_SPEED = 13.0;
-/** Crest half-width in seconds of local time at each cell. */
-const INTRO_CREST_SIGMA = 0.13;
-const INTRO_WAVE_AMPLITUDE = 0.9;
-/** Each cell eases onto its terrace over this long after the crest passes. */
-const INTRO_WAKE_SECONDS = 0.55;
-const INTRO_WAKE_LEAD_SECONDS = 0.04;
-/** Cells the swell never reaches settle with this late, slow fallback. */
-const INTRO_TERRACE_FALLBACK_START = 1.8;
-const INTRO_TERRACE_FALLBACK_SECONDS = 0.9;
+const INTRO_WAVE_WIDTH = 2.2;
+const INTRO_WAVE_AMPLITUDE = 1.05;
+const INTRO_PRESELECT_TIME = 1.25;
+const INTRO_PRESELECT_RATIO = 0.45;
+const INTRO_TERRACE_FALLBACK_START = 1.85;
+const INTRO_TERRACE_FALLBACK_SECONDS = 0.55;
 const INTRO_LIGHT_START = 1.75;
 const INTRO_LIGHT_DURATION = 0.85;
 const INTRO_BAR_START_OFFSET = 22;
-const INTRO_TOTAL_DURATION = 3.4;
-/** Seconds after the intro starts at which the swell reaches a cell. */
-function introArrival(rightOffset: number) {
-  return INTRO_FLAT_HOLD + (INTRO_WAVE_START - rightOffset) / INTRO_WAVE_SPEED;
-}
-const INTRO_LIFT_START =
-  introArrival(0) + INTRO_WAKE_SECONDS - INTRO_WAKE_LEAD_SECONDS;
-/** Terrace weight and transient crest for one cell during the intro. */
-function introField(rightOffset: number, t: number) {
-  const local = t - introArrival(rightOffset);
-  const waveActive = ease((t - INTRO_FLAT_HOLD) / 0.18);
+const INTRO_FULL_LIFT_THRESHOLD = 0.35;
+const INTRO_TOTAL_DURATION = 3.25;
+const INTRO_RELEASE_DURATION = 0.35;
+const OVERVIEW_WARMUP_BUDGET_MS = 1500;
+/** Terrace weight and transient crest for one cell during the intro.
+ *  The terrace rises on the leading slope of the wave so the crest flings
+ *  each column straight into (and slightly past) its starting height, then
+ *  settles smoothly down onto the terrace with zero post-crest lift. */
+function introField(rightOffset: number, t: number, terraceTarget: number) {
+  const waveAge = t - INTRO_FLAT_HOLD;
+  if (waveAge <= 0) return { crest: 0, terrace: 0 };
+  const front = INTRO_WAVE_START - waveAge * INTRO_WAVE_SPEED;
+  const delta = rightOffset - front;
+  const enter = ease(waveAge / 0.18);
   const fallback = ease(
     (t - INTRO_TERRACE_FALLBACK_START) / INTRO_TERRACE_FALLBACK_SECONDS,
   );
+  const wake =
+    ease((delta + INTRO_WAVE_WIDTH * 1.65) / (INTRO_WAVE_WIDTH * 1.85)) *
+    enter;
+  const terrace = Math.max(wake, fallback);
+  const overshootScale =
+    1 - 0.6 * Math.max(0, Math.min(1, terraceTarget / 2.15));
   const crest =
     INTRO_WAVE_AMPLITUDE *
-    Math.exp(-0.5 * (local / INTRO_CREST_SIGMA) ** 2) *
-    waveActive * (1 - fallback);
-  const wake =
-    ease((local + INTRO_WAKE_LEAD_SECONDS) / INTRO_WAKE_SECONDS) * waveActive;
-  return { crest, terrace: Math.max(wake, fallback) };
+    overshootScale *
+    enter *
+    (1 - fallback) *
+    Math.exp(-0.5 * (delta / INTRO_WAVE_WIDTH) ** 2);
+  return { crest, terrace };
 }
 
 type SelectionWavePulse = { row: number; lane: number; time: number };
@@ -479,11 +486,42 @@ export class ArchiveScene {
     if (
       !this.motion.selectionTransition ||
       !this.motion.selectionWave ||
-      this.targetDetail > 0
+      this.targetDetail > 0 ||
+      this.detail > 0.01 ||
+      this.fixedDetailCameraHeld ||
+      this.returnY !== null ||
+      this.rotation !== 0
     ) {
       this.finishIntro();
+      if (
+        this.targetDetail <= 0 &&
+        this.detail <= 0.01 &&
+        !this.fixedDetailCameraHeld &&
+        this.returnY === null &&
+        this.rotation === 0
+      ) {
+        const chosen = this.cellPosition(this.selectedCell);
+        this.columnCamera = { value: chosen.x, velocity: 0 };
+        this.rail = { value: SELECTED_ROW_ANCHOR_Z - chosen.z, velocity: 0 };
+        this.shoulder = { value: this.selectedCell.row, velocity: 0 };
+        this.laneFocus = { value: this.selectedCell.lane, velocity: 0 };
+        if (!this.motion.selectionTransition) {
+          this.lift = {
+            value: OVERVIEW_LIFT * this.targetReveal * (1 - this.flatMix),
+            velocity: 0,
+          };
+        }
+        this.renderState.invalidate();
+      }
       return;
     }
+    this.cancelPointer();
+    for (const { group } of this.outgoing) {
+      this.scene.remove(group);
+      this.disposeOutgoing(group);
+    }
+    this.outgoing.length = 0;
+    this.introRelease = null;
     const chosen = this.cellPosition(this.selectedCell);
     this.columnCamera = { value: chosen.x, velocity: 0 };
     this.rail = { value: SELECTED_ROW_ANCHOR_Z - chosen.z, velocity: 0 };
@@ -498,19 +536,73 @@ export class ArchiveScene {
       this.selectedCell.row - INTRO_BAR_START_OFFSET,
     );
     this.slotUnderlights.setIntroGain(0);
-    this.intro = { elapsed: 0 };
+    this.intro = { elapsed: 0, fullLiftUnlocked: false, started: false };
+    this.cameraInitialized = false;
     this.idleGain = 0;
     this.lastInteraction = this.clock;
     this.renderState.invalidate();
   }
   finishIntro(snapBar = false) {
     if (!this.intro) return;
+    if (this.intro.started && this.intro.elapsed < INTRO_TOTAL_DURATION) {
+      this.introRelease = {
+        elapsed: this.intro.elapsed,
+        age: 0,
+        cell: { ...this.selectedCell },
+      };
+    }
     this.intro = null;
     this.slotUnderlights.setIntroGain(1);
     if (snapBar) this.slotUnderlights.select(this.selectedCell, true);
     this.renderState.invalidate();
   }
+  async warmUpOverview() {
+    if (
+      !this.loaded ||
+      this.disposed ||
+      this.container.clientWidth <= 0 ||
+      this.container.clientHeight <= 0
+    ) {
+      return;
+    }
+    this.targetReveal = 1;
+    this.reveal = 1;
+    this.playIntro();
+    this.last = null;
+    this.update(performance.now() / 1000);
+    const gl = this.renderer.getContext();
+    if ("fenceSync" in gl && typeof gl.fenceSync === "function") {
+      try {
+        const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (sync) {
+          try {
+            gl.flush();
+            const deadline = performance.now() + OVERVIEW_WARMUP_BUDGET_MS;
+            while (
+              !this.disposed &&
+              performance.now() < deadline &&
+              gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED
+            ) {
+              await new Promise<void>((resolve) => setTimeout(resolve, 16));
+            }
+          } finally {
+            gl.deleteSync(sync);
+          }
+        }
+      } catch (error) {
+        console.warn("Overview GPU warm-up wait failed", error);
+      }
+    }
+    if (this.disposed) return;
+    this.last = null;
+    if (this.intro) {
+      this.intro.elapsed = 0;
+      this.intro.fullLiftUnlocked = false;
+      this.intro.started = false;
+    }
+  }
   dispose() {
+    this.disposed = true;
     this.inputEvents.abort();
     this.cancelPointer();
     this.cancelDetailSurfacePreparation();
@@ -1156,7 +1248,7 @@ export class ArchiveScene {
   private visibility = new ArchiveVisibility();
   private drawCoverage = new ArchiveDrawCoverage();
   private shadowCoverage?: ArchiveShadowCoverage;
-  private instanceCapacity = LOOP_COLUMNS * LOOP_ROWS;
+  private instanceCapacity = Math.max(LOOP_COLUMNS * LOOP_ROWS, 640);
   private drawnCells: ArchiveCell[] = [];
   private extraCoverage = false;
   setArchiveCoverage(extra: boolean) { this.extraCoverage = extra; }
@@ -1192,6 +1284,8 @@ export class ArchiveScene {
   private fixedDetailLiftTarget?: number;
   private fixedDetailCameraBasis?: FixedDetailCameraBasis;
   private overviewCameraReady = false;
+  private cameraInitialized = false;
+  private disposed = false;
   private lastRenderedFocusDepth?: number;
   private readonly modelBounds = new THREE.Box3();
   private outgoing: {
@@ -1209,8 +1303,9 @@ export class ArchiveScene {
   private targetDetail = 0;
   private reveal = 0;
   private targetReveal = 0;
-  private intro: { elapsed: number } | null = null;
-  private last = 0;
+  private intro: { elapsed: number; fullLiftUnlocked: boolean; started: boolean } | null = null;
+  private introRelease: { elapsed: number; age: number; cell: ArchiveCell } | null = null;
+  private last: number | null = null;
   private pointer = new THREE.Vector2();
   private dragging = false;
   private hoverCell: ArchiveCell | null = null;
@@ -1423,8 +1518,9 @@ export class ArchiveScene {
     gltf.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) meshes.push(o);
     });
-    const count = LOOP_COLUMNS * LOOP_ROWS;
-    for (let index = 0; index < count; index++) {
+    const poolCount = LOOP_COLUMNS * LOOP_ROWS;
+    const capacity = this.instanceCapacity;
+    for (let index = 0; index < poolCount; index++) {
       const cell = poolCell(index);
       this.cells.push(cell);
     }
@@ -1626,11 +1722,11 @@ export class ArchiveScene {
         arrayMat.roughness = 0.66;
       }
       this.appearance.register(name, mat, arrayMat);
-      this.themeAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage);
-      this.slotLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage);
-      this.neighborLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage);
-      this.lateralLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage);
-      this.topRailLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(count), 1).setUsage(THREE.DynamicDrawUsage);
+      this.themeAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
+      this.slotLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
+      this.neighborLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
+      this.lateralLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
+      this.topRailLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
       geom.setAttribute("archiveTheme", this.themeAttribute);
       geom.setAttribute("archiveSlotLight", this.slotLightAttribute);
       geom.setAttribute("archiveSlotReflection", this.neighborLightAttribute);
@@ -1638,7 +1734,7 @@ export class ArchiveScene {
       geom.setAttribute("archiveSlotTopRail", this.topRailLightAttribute);
       themeMaterial(arrayMat, name, true, this.subduedIndex);
       this.installOverviewUnderlight(arrayMat, role, "neighbor", true);
-      const inst = new THREE.InstancedMesh(geom, arrayMat, count);
+      const inst = new THREE.InstancedMesh(geom, arrayMat, capacity);
       // All surfaces move rigidly together; share the transform buffer on the GPU.
       inst.instanceMatrix = this.instances[0]?.instanceMatrix ?? inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       inst.castShadow =
@@ -2206,6 +2302,7 @@ export class ArchiveScene {
     }
     if (!value.selectionTransition || !value.selectionWave) {
       this.finishIntro(true);
+      this.introRelease = null;
     }
     if (!value.idleWave) this.idleGain = 0;
     this.motion = { ...value };
@@ -2275,6 +2372,10 @@ export class ArchiveScene {
     this.hoverLifts.clear();
     this.selectedCell.lane -= shift.lane;
     this.selectedCell.row -= shift.row;
+    if (this.introRelease) {
+      this.introRelease.cell.lane -= shift.lane;
+      this.introRelease.cell.row -= shift.row;
+    }
     this.slotUnderlights.rebase(shift.lane, shift.row);
     this.coordinateOrigin.lane += shift.lane;
     this.coordinateOrigin.row += shift.row;
@@ -3142,6 +3243,7 @@ export class ArchiveScene {
     });
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    if (!this.fixedDetailCameraHeld) this.overviewCameraReady = false;
     if (
       this.fixedDetailCameraHeld &&
       this.fixedDetailCameraPose &&
@@ -3524,18 +3626,26 @@ export class ArchiveScene {
     );
   }
   update(time: number) {
-    const elapsed = Math.max(0, time - this.last || 0.016);
-    const dt = Math.min(elapsed, 0.05);
-    this.last = time;
     this.clock = time;
     if (!this.loaded) return;
+    const elapsed = this.last === null ? 0 : Math.max(0, time - this.last);
+    const dt = Math.min(elapsed, 0.05);
+    this.last = time;
     // Selection waves advance with simulation time, not wall time. A slow
     // compile or upload frame therefore delays the crest instead of skipping it.
     this.pulseClock += dt;
     this.flushHover();
     this.slotUnderlights.update(dt, !this.motion.selectionTransition);
+    if (this.introRelease) {
+      this.introRelease.age += dt;
+      if (this.introRelease.age >= INTRO_RELEASE_DURATION) this.introRelease = null;
+    }
     if (this.intro) {
-      this.intro.elapsed += dt;
+      if (this.intro.started) {
+        this.intro.elapsed += dt;
+      } else {
+        this.intro.started = true;
+      }
       this.lastInteraction = time;
       const u = Math.max(
         0,
@@ -3553,6 +3663,13 @@ export class ArchiveScene {
       this.slotUnderlights.setBarRow(
         this.selectedCell.row - INTRO_BAR_START_OFFSET * remain,
       );
+      if (
+        !this.intro.fullLiftUnlocked &&
+        this.slotUnderlights.directFor(this.selectedCell) >=
+          INTRO_FULL_LIFT_THRESHOLD
+      ) {
+        this.intro.fullLiftUnlocked = true;
+      }
       if (this.intro.elapsed >= INTRO_TOTAL_DURATION) {
         this.finishIntro();
       }
@@ -3596,17 +3713,22 @@ export class ArchiveScene {
     const chosen = this.cellPosition(this.selectedCell);
     const selectedRow = this.selectedCell.row;
     const selectedLane = this.selectedCell.lane;
-    damp(this.shoulder, selectedRow, this.motion.selectionTransition ? 5 : 35, dt);
-    damp(this.laneFocus, selectedLane, this.motion.selectionTransition ? 4 : 35, dt);
-    // A held or freely coasting plane owns both tracks; selection cannot pull it.
-    if (!this.holdingArchive && !momentum) {
-      damp(this.columnCamera, chosen.x, this.motion.selectionTransition ? 3.7 : 35, dt);
-      damp(
-        this.rail,
-        SELECTED_ROW_ANCHOR_Z - chosen.z,
-        this.motion.selectionTransition ? 3.7 : 35,
-        dt,
-      );
+    if (!this.motion.selectionTransition) {
+      this.shoulder = { value: selectedRow, velocity: 0 };
+      this.laneFocus = { value: selectedLane, velocity: 0 };
+      // A held or freely coasting plane owns both tracks; selection cannot pull it.
+      if (!this.holdingArchive && !momentum) {
+        this.columnCamera = { value: chosen.x, velocity: 0 };
+        this.rail = { value: SELECTED_ROW_ANCHOR_Z - chosen.z, velocity: 0 };
+      }
+    } else {
+      damp(this.shoulder, selectedRow, 5, dt);
+      damp(this.laneFocus, selectedLane, 4, dt);
+      // A held or freely coasting plane owns both tracks; selection cannot pull it.
+      if (!this.holdingArchive && !momentum) {
+        damp(this.columnCamera, chosen.x, 3.7, dt);
+        damp(this.rail, SELECTED_ROW_ANCHOR_Z - chosen.z, 3.7, dt);
+      }
     }
     if (momentum) {
       this.columnCamera.value = this.trackPosition("lane", momentum.motion.lane.value);
@@ -3680,6 +3802,11 @@ export class ArchiveScene {
     const fieldLightOverview =
       (1 - fieldDetail) * (1 - this.themeAmount);
     const fieldCache = new Map<number, Map<number, number>>();
+    const introFieldState = this.intro ?? this.introRelease;
+    const introOrigin = this.introRelease?.cell ?? this.selectedCell;
+    const introRelease = this.introRelease
+      ? ease(this.introRelease.age / INTRO_RELEASE_DURATION)
+      : 0;
     const calculateField = (row: number, lane: number) => {
       const breathing = idleWave(
           row + this.coordinateOrigin.row,
@@ -3755,20 +3882,23 @@ export class ArchiveScene {
         planarSettling,
         fieldLightOverview,
       );
-      if (this.intro) {
+      if (introFieldState) {
         const rightOffset =
-          (lane - selectedLane) * COLUMN_SPACING * OVERVIEW_RIGHT_X +
-          (row - selectedRow) * ROW_SPACING * OVERVIEW_RIGHT_Z;
-        const { crest, terrace } = introField(rightOffset, this.intro.elapsed);
-        // The selected cassette rises on its own. Riding the crest as well
-        // makes it fall as the crest passes, even while extraction increases.
-        const selected = lane === selectedLane && row === selectedRow;
+          (lane - introOrigin.lane) * COLUMN_SPACING * OVERVIEW_RIGHT_X +
+          (row - introOrigin.row) * ROW_SPACING * OVERVIEW_RIGHT_Z;
+        const terraceTarget = overviewSettling * columnWave * (1 - this.flatMix);
+        const { crest, terrace } = introField(
+          rightOffset,
+          introFieldState.elapsed,
+          terraceTarget,
+        );
+        const terraceWeight = THREE.MathUtils.lerp(terrace, 1, introRelease);
         return (
-          overviewSettling * columnWave * (1 - this.flatMix) * terrace +
+          terraceTarget * terraceWeight +
           breathing *
             THREE.MathUtils.lerp(1, planeTransition, fieldLightOverview) *
-            terrace +
-          (selected ? 0 : crest) +
+            terraceWeight +
+          crest * (1 - introRelease) +
           pulseHeight +
           (activePlay && !this.reduced
             ? rhythmDisplacement(
@@ -3806,7 +3936,12 @@ export class ArchiveScene {
       return value;
     };
     const selectedBase = chosen.y + field(selectedRow, selectedLane);
-    const introLiftScale = !this.intro || this.intro.elapsed >= INTRO_LIFT_START ? 1 : 0;
+    const introLiftScale =
+      !this.intro || this.intro.fullLiftUnlocked
+        ? 1
+        : this.intro.elapsed >= INTRO_PRESELECT_TIME
+          ? INTRO_PRESELECT_RATIO
+          : 0;
     if (this.returnY !== null && this.rotation !== 0) {
       this.lift.value = this.returnY - selectedBase;
       this.lift.velocity = 0;
@@ -3815,32 +3950,35 @@ export class ArchiveScene {
       const detailLift = this.fixedDetailCamera
         ? (this.fixedDetailLiftTarget ?? INSPECTION_LIFT)
         : INSPECTION_LIFT;
-      damp(
-        this.lift,
-        this.targetDetail
-          ? detailLift
-          : this.outgoing.some(
-                (o) =>
-                  o.returnY !== null &&
-                  o.cell.lane === selectedLane &&
-                  Math.abs(o.cell.row - selectedRow) < 5,
-              )
-            ? 0
-            : OVERVIEW_LIFT *
-              this.targetReveal *
-              (1 - this.flatMix) *
-              introLiftScale,
-        !this.motion.detailTransition
-          ? 35
-          : this.fixedDetailCamera && this.targetDetail
+      const liftTarget = this.targetDetail
+        ? detailLift
+        : this.outgoing.some(
+              (o) =>
+                o.returnY !== null &&
+                o.cell.lane === selectedLane &&
+                Math.abs(o.cell.row - selectedRow) < 5,
+            )
+          ? 0
+          : OVERVIEW_LIFT *
+            this.targetReveal *
+            (1 - this.flatMix) *
+            introLiftScale;
+      if (!this.motion.detailTransition) {
+        this.lift = { value: liftTarget, velocity: 0 };
+      } else {
+        damp(
+          this.lift,
+          liftTarget,
+          this.fixedDetailCamera && this.targetDetail
             ? DETAIL_LIFT_OPEN_RATE
             : this.deferSelectionPulse &&
                 !this.targetDetail &&
                 this.lift.value < OVERVIEW_LIFT
               ? 7.6
               : 4.2,
-        dt,
-      );
+          dt,
+        );
+      }
     }
     const cameraTarget = this.fixedDetailCamera
       ? this.targetDetail
@@ -4024,6 +4162,7 @@ export class ArchiveScene {
       : 0;
     if (fixedPose) {
       this.applyFixedDetailCameraMove(cameraMove, cameraAimMove);
+      this.cameraInitialized = true;
     } else {
       // A direct detail URL has no overview frame yet. Seed and capture the
       // ordinary overview pose here rather than duplicating its construction.
@@ -4097,11 +4236,12 @@ export class ArchiveScene {
       const cameraTransition = this.targetDetail || this.detail > 0.01
         ? this.motion.detailTransition
         : this.motion.selectionTransition;
-      const cameraBlend = this.fixedDetailCameraHeld
-        ? 1
-        : cameraTransition
-          ? 1 - Math.exp(-dt * 5)
-          : 1;
+      const cameraBlend =
+        !this.cameraInitialized || this.fixedDetailCameraHeld
+          ? 1
+          : cameraTransition
+            ? 1 - Math.exp(-dt * 5)
+            : 1;
       this.camera.position.lerp(cameraPosition, cameraBlend);
       this.cameraAim.lerp(cameraAim, cameraBlend);
       this.camera.lookAt(this.cameraAim);
@@ -4115,6 +4255,7 @@ export class ArchiveScene {
         ),
         cameraBlend,
       );
+      this.cameraInitialized = true;
     }
     const fog = this.scene.fog as THREE.Fog;
     // The camera position is damped after its target distance changes. Anchor
@@ -4698,7 +4839,7 @@ export class ArchiveScene {
       intro: this.intro
         ? {
             elapsed: Math.round(this.intro.elapsed * 1000) / 1000,
-            fullLiftUnlocked: this.intro.elapsed >= INTRO_LIFT_START,
+            fullLiftUnlocked: this.intro.fullLiftUnlocked,
           }
         : null,
     };

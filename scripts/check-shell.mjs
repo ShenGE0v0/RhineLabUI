@@ -26,7 +26,16 @@ async function load(path) {
   return scene;
 }
 
-const assembly = await load("../public/assets/archive-assembly.glb");
+const [cassette, assembly] = await Promise.all([
+  load("../public/assets/archive-cassette.glb"),
+  load("../public/assets/archive-assembly.glb"),
+]);
+for (const [scene, name] of [[cassette, "REF_ruler"], [assembly, "body__REF_Ruler"]]) {
+  const ruler = scene.getObjectByName(name);
+  assert.ok(ruler?.isMesh, name + " retains its side scale");
+  const bounds = new THREE.Box3().setFromObject(ruler);
+  assert.ok(bounds.min.y > 0.65 && bounds.max.y > 3, name + " has no bottom scale");
+}
 const boxes = new Map();
 const meshes = new Map();
 const names = new Set();
