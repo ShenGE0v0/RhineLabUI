@@ -10,9 +10,8 @@
 | --- | --- |
 | [网页交接](docs/HANDOFF.md) | 当前代码基线、资产 SHA-256、控制台调试入口与待办 |
 | [开发规范与交付流程](docs/AGENTS.md) | 技术边界、编码红线、命令速查与审核交付流程 |
-| [设计规范](docs/DESIGN.md) | 双端形态、三维阵列、卡匣、布光、卡面排版与音频规范 |
+| [设计规范](docs/DESIGN.md) | 网页端形态、三维阵列、卡匣、布光、卡面与音频规范 |
 | [档案数据维护](content/README.md) | `archives.json` 字段定义、数量约束与 TXT 导出校验 |
-| [Wallpaper Engine](docs/WALLPAPER-ENGINE.md) | 壁纸本地打包、预览与宿主属性说明 |
 | [Cloudflare 部署](docs/CLOUDFLARE-DEPLOYMENT.md) · [PWA 离线说明](docs/PWA.md) | 静态托管构建、缓存策略、主屏幕安装与更新恢复 |
 | 本地工作区 `../design-preview/README.md` | 仓库同级目录的 Blender 源文件、导出链与建模避坑手册 |
 
@@ -34,13 +33,12 @@ npm run build
 npm run preview
 ```
 
-网页构建产物位于 `dist/`，可部署到静态 HTTP 服务。执行 `npm run build:wallpaper` 可生成 Wallpaper Engine 本地版本，产物位于 `release/wallpaper/`。
+网页构建产物位于 `dist/`，可部署到静态 HTTP 服务。
 
 ## 浏览档案
 
 - **网页纯净画布模式**：用方向键、滚轮或拖动阵列切列、翻档；指针悬停卡片时产生 3D 微抬并预选，选中卡片在卡匣正面展示作品标题、生成模型名、厂商图标、展示图、互动统计、刻录日期与 Code 39 条码。按 `Enter` 或双击展开选中卡片（长焦推进至 3/4 正面特写，保持磨砂卡匣质感），按 `Esc` 返回阵列。
 - **快捷检索**：按 `/` 打开检索，可按作品名、编号、模型名或分类查找档案。原作链接和下载文本可在[档案数据](content/archives.json)及 [TXT 目录](public/archives/)中查阅。
-- **Wallpaper Engine 本地版本**：在壁纸端启用完整 2D 叠加界面、悬停浮层与详情面板（访问原作、收藏、下载 TXT），支持在「档案展示」与「桌面工作台」间切换，并可进入支持旋转、缩放、平移、拆解与清晰／磨砂切换的 360° 模型查看器。
 
 ## 修改档案
 

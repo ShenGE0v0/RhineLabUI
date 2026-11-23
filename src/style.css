@@ -478,13 +478,6 @@ button {
   font-style: normal;
   margin: 0 5px;
 }
-.system-footer button {
-  font-size: 10px;
-  letter-spacing: 1px;
-}
-.system-footer button:hover {
-  color: #111;
-}
 .detail-ui {
   position: absolute;
   inset: 0;

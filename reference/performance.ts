@@ -1,6 +1,5 @@
 import { ArchiveScene } from '../src/scene';
 import { qualityPresets } from '../src/render-quality';
-import { quietBands } from '../src/archive-play-motion';
 
 // Fixed random kernel makes before/after SSAO comparisons reproducible.
 let seed = 431;
@@ -14,7 +13,6 @@ scene.setQuality(qualityPresets.original);
 scene.setMode('archive');
 scene.select(0);
 scene.revealImmediately();
-scene.uiOnlyParallax = true;
 let time = 100;
 const gl = scene.renderer.getContext() as WebGL2RenderingContext;
 const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
@@ -33,8 +31,6 @@ Object.assign(window, { bench: {
     // 暗色主题已移除：原外观主题切换调用一并删除，基准页只有亮色一种外观。
     scene.setQuality({ ...qualityPresets.original, ...options.quality });
     scene.setReduced(name === 'static');
-    scene.setPlayfield(true, quietBands(), 1, name === 'static' ? 1 : 0, null, name !== 'static');
-    scene.setRhythmStyle(options.rhythm || 'legacy');
     scene.setMode(name === 'detail' || name === 'inspect' ? 'detail' : 'archive');
     // Advance springs without expensive draws, then render real warm-up frames.
     const render = internal.composer.render;
@@ -51,7 +47,6 @@ Object.assign(window, { bench: {
     for (let i = 0; i < count; i++) {
       if (name === 'navigate' && i % 12 === 0) scene.select((i / 12 + 1) % 8);
       if (name === 'inspect') internal.targetRotation = .45 * Math.sin(i * .055);
-      if (name === 'music') scene.setPlayfield(true, {low:.5+.3*Math.sin(i*.27),mid:.4+.2*Math.sin(i*.19),high:.3+.2*Math.cos(i*.31),activity:1},1,1,null,true);
       const query = ext ? gl.createQuery() : null;
       uploads = uploadBytes = 0;
       if (query) gl.beginQuery(ext.TIME_ELAPSED_EXT, query);

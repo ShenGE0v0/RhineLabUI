@@ -18,9 +18,9 @@ await new Promise(r=>server.listen(5193,'127.0.0.1',r));
 const browser = await chromium.launch({channel:'msedge',headless:true});
 const results = [], errors = [];
 try {
-  for(const scenario of (process.env.PERF_CASES || 'static,idle,navigate,detail,music').split(',')) {
+  for(const scenario of (process.env.PERF_CASES || 'static,idle,navigate,detail').split(',')) {
     const name = scenario.split('-')[0];
-    const options = {rhythm:scenario.includes('wave')?'wave':scenario.includes('flow')?'lift':'legacy',quality:{}};
+    const options = {quality:{}};
     if(scenario.includes('half')) options.quality.aoResolution=.5;
     if(scenario.includes('noao')) options.quality.aoSamples=0;
     if(scenario.includes('nodof')) options.quality.depthOfField=0;

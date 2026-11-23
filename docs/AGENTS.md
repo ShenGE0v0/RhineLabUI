@@ -4,7 +4,7 @@
 
 - [开发规范与交付流程](AGENTS.md)（本文）：技术限制、编码红线、命令速查与审核交付规则。
 - [网页交接](HANDOFF.md)：当前 Git 基线、资产 SHA-256、调试控制台接口与剩余待办。
-- [设计规范](DESIGN.md)：当前生效的双端形态、三维阵列、卡匣外观、布光、动效、卡面与音频规范。
+- [设计规范](DESIGN.md)：当前生效的网页形态、三维阵列、卡匣外观、布光、动效、卡面与音频规范。
 - 本地工作区 `../../design-preview/README.md` 记录 Blender 生产源、GLB 导出链与建模注意事项。
 
 ---
@@ -12,12 +12,12 @@
 ## 技术边界与范围约束
 
 1. **原生技术栈**：项目使用 **TypeScript + Three.js + Vite + 原生 DOM/SVG/Canvas** 实现。不引入前端 UI 框架，不启用前端设计或动效 Skill。
-2. **维护范围**：仅维护本项目的网页端（含 PWA / Cloudflare Pages 静态构建）与本地 Wallpaper Engine 构建（`build:wallpaper`），不收录或维护 DSH Desktop 衍生主题、安装工具及其独立发布流程。
+2. **维护范围**：仅维护本项目的网页端（含 PWA / Cloudflare Pages 静态构建）；Wallpaper Engine 桌面壁纸支持已停止并移除，亦不收录或维护 DSH Desktop 衍生主题、安装工具及其独立发布流程。
 3. **资产与媒体边界**：
    - 严禁在生产源码或构建包中嵌入原参考视频。
    - 严禁通过普通网页接口伪造本地桌面文件系统集成。
    - 三维模型资产统一由 Blender 5.2（经 Blender MCP 或生产脚本）维护，保留同级 `design-preview/` 中的源文件与导出脚本，并与 `public/assets/` 保持字节/SHA-256 一致。
-4. **已废止机制提醒**：早期上游的 2D 逐帧开机片头、Novecento 授权字体、进入详情磨砂变透明解密及 17 类交互音效均已从产品逻辑移除，编写新功能或更新文档时不得恢复对这些机制的依赖。
+4. **已废止机制提醒**：早期上游的 2D 逐帧开机片头、Novecento 授权字体、进入详情磨砂变透明解密、17 类交互音效，以及 Wallpaper Engine 桌面壁纸端、桌面工作台、外部音频频谱律动与 3D 卸载开关均已从产品逻辑移除，编写新功能或更新文档时不得恢复对这些机制的依赖。
 
 ---
 
@@ -63,11 +63,9 @@
 | 校验并导出 TXT 档案 | `npm run export:archives` |
 | 校验档案结构与导出一致性 | `npm run check:content` |
 | 构建网页版 + PWA 资源清单 | `npm run build` |
-| 构建 Wallpaper Engine 本地包 | `npm run build:wallpaper` |
 | 打包 Cloudflare Pages 静态发行包 | `npm run build:cloudflare` |
 | 校验卡匣与拆解 GLB 结构 | `node scripts/check-shell.mjs`、`node scripts/check-assembly.mjs` |
 | 校验入场四阶段与减少动态效果 | `node scripts/check-startup-motion.mjs`（默认访问 `5190`，可用 `REVIEW_URL` 覆盖） |
 | 校验循环阵列与可见性 | `node scripts/check-loop.mjs`、`node scripts/check-archive-visibility.mjs` |
 | 校验视口适配 | `npm run check:viewport` |
-| 校验壁纸构建产物与宿主逻辑 | `node scripts/check-wallpaper.mjs` |
 | 校验 PWA 重定向恢复 | `node --test scripts/check-pwa-redirect.mjs` |

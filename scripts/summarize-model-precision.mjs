@@ -7,7 +7,7 @@ const {PNG}=require(process.env.PNGJS_MODULE||'pngjs');
 const median=a=>a.sort((a,b)=>a-b)[Math.floor(a.length/2)]??null;
 const report={};
 const stableKeys=['modelPosition','cameraPosition','fieldOfView','archiveCount','archiveCandidates','selectedSlot','selectedCell','rotation','extraction','cameraDetail','cameraNear','cameraFar','fogNear','fogFar'];
-for(const surface of process.argv.slice(2).length?process.argv.slice(2):['browser','host']){
+for(const surface of process.argv.slice(2).length?process.argv.slice(2):['browser']){
   const root=`verification/model-precision/${surface}`;
   const {runs,errors}=JSON.parse(await readFile(`${root}/runs.json`));
   assert.deepEqual(errors,[]);

@@ -5,7 +5,6 @@ import { InstanceUpdates } from "./instance-updates";
 import { RenderState } from "./render-state";
 import { SharedDepthAO, SharedDepthBokeh } from "./shared-depth";
 import { disposeThreeTree } from "./three-resources";
-import { RhythmMotion, rhythmDisplacement, quietBands, type MusicBands, type RhythmStyle } from "./archive-play-motion";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { createArchiveLighting, type LightingLook } from "./archive-lighting";
 import {
@@ -458,18 +457,6 @@ function columnSwitchWave(
 }
 export class ArchiveScene {
   private inputEvents = new AbortController();
-  private presence = 1;
-  private presenceTarget = 1;
-  setPresentationVisible(visible: boolean, immediate = false) {
-    this.presenceTarget = Number(visible);
-    if (immediate) this.presence = this.presenceTarget;
-    if (!visible) this.cancelPointer();
-  }
-  get presentationHidden() { return this.presenceTarget === 0 && this.presence === 0; }
-  private presentationDrop(cell: ArchiveCell) {
-    const delay = .15 * (1 + Math.tanh((cell.row - this.selectedCell.row) * .1 + (cell.lane - this.selectedCell.lane) * .25));
-    return 35 * Math.pow(THREE.MathUtils.clamp((1 - this.presence - delay) / .7, 0, 1), 2);
-  }
   revealImmediately() { this.reveal = this.targetReveal; }
   playIntro() {
     if (
@@ -496,7 +483,7 @@ export class ArchiveScene {
         this.laneFocus = { value: this.selectedCell.lane, velocity: 0 };
         if (!this.motion.selectionTransition) {
           this.lift = {
-            value: OVERVIEW_LIFT * this.targetReveal * (1 - this.flatMix),
+            value: OVERVIEW_LIFT * this.targetReveal,
             velocity: 0,
           };
         }
@@ -601,7 +588,7 @@ export class ArchiveScene {
     this.shoulder = { value: this.selectedCell.row, velocity: 0 };
     this.laneFocus = { value: this.selectedCell.lane, velocity: 0 };
     this.lift = {
-      value: OVERVIEW_LIFT * (1 - this.flatMix),
+      value: OVERVIEW_LIFT,
       velocity: 0,
     };
     this.slotUnderlights.select(this.selectedCell, true);
@@ -681,7 +668,6 @@ export class ArchiveScene {
     this.renderer.domElement.remove();
     this.loaded = false;
   }
-  uiOnlyParallax = false;
   private superPerformance = false;
   setSuperPerformance(enabled: boolean) {
     if (this.superPerformance === enabled) return;
@@ -1180,45 +1166,6 @@ export class ArchiveScene {
   private neighborLightAttribute?: THREE.InstancedBufferAttribute;
   private lateralLightAttribute?: THREE.InstancedBufferAttribute;
   private topRailLightAttribute?: THREE.InstancedBufferAttribute;
-  private playfield = { enabled: false, bands: quietBands(), strength: 1, flatten: 0, target: null as string | null, breathing: true };
-  private flatMix = 0;
-  private rhythm = new RhythmMotion();
-  private rhythmStyle: RhythmStyle = "legacy";
-  setRhythmStyle(style: RhythmStyle) { this.rhythmStyle = style; }
-  private relayLifts = new Map<string, number>();
-  private relayPoints = new Map<string, { cell: ArchiveCell; point: THREE.Vector3 }>();
-  private relayActive = false;
-  onRelayPick?: (key: string | null) => void;
-  setPlayfield(enabled: boolean, bands: MusicBands, strength: number, flatten: number, target: string | null, breathing = true) {
-    this.playfield = { enabled, bands, strength, flatten, target, breathing };
-  }
-  setRelayActive(active: boolean) {
-    if (active === this.relayActive) return;
-    this.cancelPointer(); this.setHover(null); this.relayActive = active;
-    this.pointer.set(0, 0);
-  }
-  relayPulse(key: string) {
-    const cell = this.relayPoints.get(key)?.cell;
-    if (cell && !this.reduced) this.emitPulse(cell);
-  }
-  projectRelay(key: string) {
-    const item = this.relayPoints.get(key);
-    if (!item) return null;
-    const point = item.point.clone().project(this.camera);
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    return { x: rect.left + (point.x + 1) * rect.width / 2, y: rect.top + (1 - point.y) * rect.height / 2 };
-  }
-  relayCandidates() {
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    this.scene.updateMatrixWorld(true);
-    return [...this.relayPoints.keys()].filter(key => {
-      const p = this.projectRelay(key)!;
-      const x = (p.x - rect.left) / rect.width, y = (p.y - rect.top) / rect.height;
-      if (x < .18 || x > .82 || y < .32 || y > .76) return false;
-      const hit = this.pickCell(p.x, p.y);
-      return hit && cellKey(hit) === key;
-    });
-  }
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   // The reference uses a long lens 72–140 units from the cassette. A 0.1 near
@@ -1283,8 +1230,6 @@ export class ArchiveScene {
   private shadowCoverage?: ArchiveShadowCoverage;
   private instanceCapacity = Math.max(LOOP_COLUMNS * LOOP_ROWS, 640);
   private drawnCells: ArchiveCell[] = [];
-  private extraCoverage = false;
-  setArchiveCoverage(extra: boolean) { this.extraCoverage = extra; }
   private model = new THREE.Group();
   private appearance = new CardAppearance();
   private cursor = new THREE.Vector2();
@@ -2353,7 +2298,7 @@ export class ArchiveScene {
       old.dispose();
       this.aoKernelSize = quality.aoSamples;
     }
-    // The clean web layout uses its own lighting; the wallpaper retains its AO setting.
+    // Fixed-detail Web view maintains its own lighting rig; keep AO off there.
     this.ao.enabled = quality.aoSamples > 0 && !this.fixedDetailCamera;
     this.bokeh.enabled = quality.depthOfField > 0;
     this.smaa.enabled = quality.antialias === "smaa";
@@ -3314,7 +3259,6 @@ export class ArchiveScene {
   }
   private canBrowse() {
     return (
-      this.presenceTarget === 1 &&
       !this.targetDetail &&
       this.detail < 0.2 &&
       this.reveal >= 0.8 &&
@@ -3525,13 +3469,8 @@ export class ArchiveScene {
       this.archiveDrag.start(e.clientX, e.clientY, this.dragProjection(), e.timeStamp);
       this.setHover(null);
       canvas.setPointerCapture(e.pointerId);
-      if (this.relayActive) { this.holdingArchive = false; this.dragging = false; }
     }, { signal: this.inputEvents.signal });
     canvas.addEventListener("pointermove", (e) => {
-      if (this.relayActive) {
-        if (e.pointerId === activePointer) moved ||= Math.hypot(e.clientX - startX, e.clientY - startY) > 7;
-        return;
-      }
       if (activePointer !== null && e.pointerId !== activePointer) return;
       if (activePointer === null) {
         // Coalesce uncaptured hover only; dragging and release velocity stay immediate.
@@ -3560,10 +3499,6 @@ export class ArchiveScene {
     canvas.addEventListener("pointerup", (e) => {
       pointers.delete(e.pointerId);
       if (e.pointerId !== activePointer) return;
-      if (this.relayActive) {
-        if (!cancelled && !moved) { const cell = this.pickCell(e.clientX, e.clientY); this.onRelayPick?.(cell ? cellKey(cell) : null); }
-        reset(); return;
-      }
       if (!cancelled && browse && this.canBrowse()) {
         moveArchive(e);
         if (this.archiveDrag.active) {
@@ -3621,7 +3556,6 @@ export class ArchiveScene {
     canvas.addEventListener(
       "wheel",
       (e) => {
-        if (this.relayActive) { e.preventDefault(); return; }
         if (
           !this.canBrowse() ||
           activePointer !== null ||
@@ -3721,9 +3655,6 @@ export class ArchiveScene {
       }
     }
     this.syncOverviewSlotLights();
-    const step = !this.motion.surfaceTransitions ? 1 : Math.min(elapsed, .25) / 1.1;
-    this.presence += Math.sign(this.presenceTarget - this.presence) * Math.min(step, Math.abs(this.presenceTarget - this.presence));
-    this.renderer.domElement.style.opacity = String(THREE.MathUtils.clamp(this.presence / .16, 0, 1));
     const blend = 1 - Math.exp(-dt * (this.motion.selectionTransition ? 2.8 : 35));
     const detailBlend = 1 - Math.exp(-dt * (this.motion.detailTransition ? 2.8 : 35));
     this.reveal = THREE.MathUtils.lerp(this.reveal, this.targetReveal, blend);
@@ -3810,7 +3741,7 @@ export class ArchiveScene {
       idleFor < 60;
     this.idleGain = THREE.MathUtils.lerp(
       this.idleGain,
-      idle ? (this.playfield.enabled ? (this.playfield.breathing && !this.relayActive ? 1 - this.playfield.bands.activity : 0) : 1) : 0,
+      idle ? 1 : 0,
       1 - Math.exp(-dt * (idle ? 0.8 : 4)),
     );
     // Snap, or the exponential tail would keep the matrices changing forever.
@@ -3821,21 +3752,6 @@ export class ArchiveScene {
       this.targetDetail || this.returnY !== null || aligningCopy ? 0 : 1,
       1 - Math.exp(-dt * 8),
     );
-    const play = this.playfield;
-    const activePlay = !this.targetDetail && play.enabled;
-    const rhythm = this.rhythm.update(activePlay && !this.reduced ? play.bands : quietBands(), time, dt, this.rhythmStyle);
-    this.flatMix += ((activePlay ? play.flatten : 0) - this.flatMix) * (this.reduced ? 1 : 1 - Math.exp(-dt * 4));
-    const gameTarget = activePlay ? play.target : null;
-    if (gameTarget && !this.relayLifts.has(gameTarget)) this.relayLifts.set(gameTarget, 0);
-    for (const [key, height] of this.relayLifts) {
-      const next = height + ((key === gameTarget ? .95 : 0) - height) * (this.reduced ? 1 : 1 - Math.exp(-dt * 8));
-      if (next < .001 && key !== gameTarget) this.relayLifts.delete(key); else this.relayLifts.set(key, next);
-    }
-    const spectrumPoint = new THREE.Vector3();
-    const screenX = (row: number, lane: number) => {
-      spectrumPoint.set((lane - 2) * COLUMN_SPACING - trackX, -4.6, (row - 15.5) * ROW_SPACING + this.rail.value).project(this.camera);
-      return (spectrumPoint.x + 1) / 2;
-    };
     // Fixed Web detail frames keep the overview field while logical detail
     // advances independently for decryption and application state.
     const fieldDetail = this.fixedDetailCamera ? 0 : this.detail;
@@ -3925,7 +3841,7 @@ export class ArchiveScene {
         const rightOffset =
           (lane - introOrigin.lane) * COLUMN_SPACING * OVERVIEW_RIGHT_X +
           (row - introOrigin.row) * ROW_SPACING * OVERVIEW_RIGHT_Z;
-        const terraceTarget = overviewSettling * columnWave * (1 - this.flatMix);
+        const terraceTarget = overviewSettling * columnWave;
         const { crest, terrace } = introField(
           rightOffset,
           introFieldState.elapsed,
@@ -3938,31 +3854,17 @@ export class ArchiveScene {
             THREE.MathUtils.lerp(1, planeTransition, fieldLightOverview) *
             terraceWeight +
           crest * (1 - introRelease) +
-          pulseHeight +
-          (activePlay && !this.reduced
-            ? rhythmDisplacement(
-                row,
-                lane,
-                time,
-                play.bands,
-                play.strength,
-                rhythm,
-                screenX(row, lane),
-              )
-            : 0) +
-          (this.relayLifts.get(cellKey({ row, lane })) ?? 0)
+          pulseHeight
         );
       }
       return (
-        overviewSettling * columnWave * (1 - this.flatMix) +
+        overviewSettling * columnWave +
         breathing * THREE.MathUtils.lerp(
           1,
           planeTransition,
           fieldLightOverview,
         ) +
-        pulseHeight +
-        (activePlay && !this.reduced ? rhythmDisplacement(row, lane, time, play.bands, play.strength, rhythm, screenX(row, lane)) : 0) +
-        (this.relayLifts.get(cellKey({ row, lane })) ?? 0)
+        pulseHeight
       );
     };
     const field = (row: number, lane: number): number => {
@@ -3996,7 +3898,6 @@ export class ArchiveScene {
           ? 0
           : OVERVIEW_LIFT *
             this.targetReveal *
-            (1 - this.flatMix) *
             introLiftScale;
       if (!this.motion.detailTransition) {
         this.lift = { value: liftTarget, velocity: 0 };
@@ -4062,8 +3963,7 @@ export class ArchiveScene {
           OVERVIEW_VISUAL_LIFT *
             THREE.MathUtils.smoothstep(o.lift.value, 0, OVERVIEW_LIFT) *
             (1 - renderDetail) +
-          hoverLift(o.cell) -
-          this.presentationDrop(o.cell),
+          hoverLift(o.cell),
         p.z + entryZ + this.rail.value,
       );
       const quality = ease(o.lift.value / OVERVIEW_LIFT);
@@ -4117,8 +4017,7 @@ export class ArchiveScene {
         field(selectedRow, selectedLane) +
         this.lift.value +
         selectedVisualLift +
-        hoverLift(this.selectedCell) -
-        this.presentationDrop(this.selectedCell),
+        hoverLift(this.selectedCell),
       chosen.z + entryZ + this.rail.value,
     );
     // Extraction only changes elevation. Reframing belongs to the camera.
@@ -4143,8 +4042,7 @@ export class ArchiveScene {
               this.model.position.y -
               this.lift.value -
               selectedVisualLift -
-              hoverLift(this.selectedCell) +
-              this.presentationDrop(this.selectedCell),
+              hoverLift(this.selectedCell),
             z: this.model.position.z,
             aspect:
               this.container.clientWidth / this.container.clientHeight,
@@ -4260,7 +4158,7 @@ export class ArchiveScene {
       const cameraPosition = cameraAim
         .clone()
         .addScaledVector(viewDirection, distance);
-      if (this.motion.pointerParallax && !this.uiOnlyParallax) {
+      if (this.motion.pointerParallax) {
         cameraPosition.x += this.pointer.x * 0.12;
         cameraPosition.y -= this.pointer.y * 0.12;
       }
@@ -4385,16 +4283,13 @@ export class ArchiveScene {
         }
       }
     }
-    // Music can depend on projected X; invalidate after the camera advances.
-    if (activePlay && !this.reduced) fieldCache.clear();
     // Build and compact the instance set only after the actual damped camera
     // is final for this frame. Picking uses the same packed index-to-cell map.
-    this.cells = this.visibility.update(this.camera, fog.far, trackX, entryZ + this.rail.value, this.extraCoverage);
+    this.cells = this.visibility.update(this.camera, fog.far, trackX, entryZ + this.rail.value, false);
     const hidden = new Set(this.outgoing.map(o => cellKey(o.cell)));
     hidden.add(cellKey(this.selectedCell));
     this.drawnCells = [];
     this.hoverBadgeInstance.value = -1;
-    this.relayPoints.clear();
     this.drawCoverage.update(this.camera);
     this.shadowCoverage?.begin();
     this.matrixUpdates ??= new InstanceUpdates(this.instances[0].instanceMatrix);
@@ -4414,7 +4309,7 @@ export class ArchiveScene {
       const { row, lane } = cell;
       if (hidden.has(cellKey(cell))) continue;
       const x = (lane - 2) * COLUMN_SPACING - trackX;
-      const y = -4.6 + field(row, lane) + hoverLift(cell) - this.presentationDrop(cell);
+      const y = -4.6 + field(row, lane) + hoverLift(cell);
       const z = (row - 15.5) * ROW_SPACING + entryZ + this.rail.value;
       if (!this.visibility.intersects(x, y, z)) continue;
 
@@ -4423,7 +4318,6 @@ export class ArchiveScene {
       this.dummy.rotation.set(slope * .024 * (1 - renderDetail), 0, 0);
       this.dummy.scale.set(1, 1, 1);
       this.dummy.updateMatrix();
-      if (play.enabled) this.relayPoints.set(cellKey(cell), { cell: { ...cell }, point: new THREE.Vector3(0, 3.5, 0).applyMatrix4(this.dummy.matrix) });
       this.shadowCoverage?.add(this.dummy.matrix);
       if (!this.drawCoverage.contains(x, y, z)) continue;
       const i = this.drawnCells.length;
@@ -4685,13 +4579,11 @@ export class ArchiveScene {
       renderedFrames: this.renderedFrames,
       reusedFrames: this.reusedFrames,
       superPerformance: this.superPerformance,
-      presentation: this.presence,
       triangles: this.renderer.info.render.triangles,
       archiveCount: this.drawnCells.length,
       archiveCandidates: this.cells.length,
       archiveCulled: this.cells.length - this.drawnCells.length,
       archiveCapacity: this.instanceCapacity,
-      archiveCoverage: this.extraCoverage ? "extra" : "standard",
       returningFiles: this.outgoing.length,
       selectionPhase: this.pendingPulse
         ? "lifting"
@@ -4732,8 +4624,6 @@ export class ArchiveScene {
       appearance: Math.round(ease(this.lift.value / OVERVIEW_LIFT) * 1000) / 1000,
       cameraDetail: Math.round(this.detail * 1000) / 1000,
       idleGain: this.idleGain,
-      flatten: this.flatMix,
-      spectrumActivity: this.playfield.bands.activity,
       cameraDistance: this.camera.position.distanceTo(this.cameraAim),
       cameraNear: this.camera.near,
       cameraFar: this.camera.far,

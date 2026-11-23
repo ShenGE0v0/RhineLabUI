@@ -4,15 +4,15 @@
 
 ---
 
-## 1. 双端形态定位
+## 1. 网页端形态定位
 
-| 维度 | 网页端（纯净画布 `.web-archive-clean`） | Wallpaper Engine 本地端 |
-| --- | --- | --- |
-| 2D HUD 与侧边栏 | 默认隐藏 `.brand`、`.system-nav`、`#archive-ui`、`#detail-ui`、`.powered`、`.system-footer`、`#inspection-marks` 及归档态更新提示 | 保留完整 2D UI、悬停标题浮层、详情侧栏（访问原作、收藏、下载 TXT） |
-| 桌面工作台 | 无 | 可在「档案展示」与「桌面工作台」间切换（时钟、今日事项、重要日程、媒体信息、专注计时、波纹接力小游戏） |
-| 详情推进方式 | 启用 `fixedDetailCamera`，恒定 `6.556°` 长焦球面双弹簧推进，背景维持总览阵列表现 | 完整详情镜头与右侧 2D 详情面板联动 |
-| 360° 查看器 | 无界面入口 | 支持从详情进入，提供旋转、缩放、平移、拆解／重组及手动清晰／磨砂切换 |
-| 快捷键 | 方向键、滚轮、拖拽、`Enter`/双击打开详情、`Esc` 返回、`/` 检索、手柄 `Home` 收藏弹窗 | 鼠标拖拽与界面交互为主（桌面壁纸环境下宿主可能拦截键盘和滚轮）；支持独立宿主属性控制 |
+项目以单一网页纯净画布形态（`.web-archive-clean`）运行（原 Wallpaper Engine 桌面壁纸端及桌面工作台已移除）：
+
+| 维度 | 网页端（纯净画布 `.web-archive-clean`） |
+| --- | --- |
+| 2D HUD 与侧边栏 | 默认隐藏 `.brand`、`.system-nav`、`#archive-ui`、`#detail-ui`、`.powered`、`.system-footer`、`#inspection-marks` 及归档态更新提示 |
+| 详情推进方式 | 启用 `fixedDetailCamera`，恒定 `6.556°` 长焦球面双弹簧推进，背景维持总览阵列表现 |
+| 快捷键 | 方向键、滚轮、拖拽、`Enter`/双击打开详情、`Esc` 返回、`/` 检索、手柄 `Home` 收藏弹窗 |
 
 ---
 
@@ -46,15 +46,15 @@
 
 ## 4. 布光、色彩与材质质感
 
-- **唯一主题**：**亮色暖焦糖调**（背景与雾 `OVERVIEW_MIST = #f3eee8`、`WARM` 色板），网页端与壁纸端共用同一套色彩，不提供配色切换入口。
+- **唯一主题**：**亮色暖焦糖调**（背景与雾 `OVERVIEW_MIST = #f3eee8`、`WARM` 色板），全站固定同一套色彩，不提供配色切换入口。
 - **亮色实景四灯系统**（`src/scene.ts`）：
-  - 主聚光灯：`#ffead6`，位置从总览 `(-23, 21, 5)` / 强度 `205` 过渡至详情 `(-21, 20, 14)` / 强度 `290`（关闭 `fixedDetailCamera` 的壁纸端还会将颜色插值至 `#ffd8ba`；网页纯净模式维持总览灯光），启用软阴影（`PCFShadowMap`、`shadow.radius = 4`）。
+  - 主聚光灯：`#ffead6`，位置从总览 `(-23, 21, 5)` / 强度 `205` 过渡至详情 `(-21, 20, 14)` / 强度 `290`（网页纯净模式启用 `fixedDetailCamera` 时维持总览灯光），启用软阴影（`PCFShadowMap`、`shadow.radius = 4`）。
   - 天空半球补光（`#fff3e8` / `#b88b68`）与右前掠射补光（`#ffead8`）。
   - 底部长条面光（`RectAreaLight`，`#ffba60`，`36 × 0.29`，`y = -3.35`，`zOffset = 0.12`，强度 `30`）与地面发光条共用连续滑行坐标。
 - **长条底光透射联动**（`src/archive-slot-underlight.ts`）：
   - 以临界阻尼连续坐标 `(barRow, barLane)` 驱动 `directFor`（紧支集直透）、`reflectionFor`（同列 `-X` 竖脊约 12–13 格扩散）、`topRailFor` 与 `lateralFor`（邻列顶轨透光）。
   - 选中卡左下正面受光与封条压暗（`installOverviewSealFill`）协同工作，防止出现白牙状过曝高光。
-- **统一磨砂质感**：已正式取消「进入详情由磨砂变透明」的解密揭示动画，**总览与详情统一保持磨砂卡匣质感**（选中卡 `glass` 统一 `clearcoat = 0.28`、`clearcoatRoughness = 0.18`）。仅 Wallpaper Engine 下的 360° 独立查看器保留手动清晰／磨砂切换按钮。
+- **统一磨砂质感**：已正式取消「进入详情由磨砂变透明」的解密揭示动画，**总览与详情统一保持磨砂卡匣质感**（选中卡 `glass` 统一 `clearcoat = 0.28`、`clearcoatRoughness = 0.18`）。
 
 ---
 
@@ -91,6 +91,5 @@
 ## 7. 音频规范
 
 - **已移除全部交互音效**：不生成点击、悬停、切档、抽取、归位、弹窗或桌面交互声效。
-- **保留背景音乐与频谱律动**：
-  - 仅保留「观测室（Observatory）」三轨同步循环背景配乐（[音频说明](../public/audio/README.md)），支持独立音乐开关与音量调节。
-  - 在 Wallpaper Engine 模式下支持接收外部 128-bin 系统音频频谱驱动阵列音乐律动（原版多层起伏 / 方案 A 左右连续频谱 / 方案 B 连续层叠流波），见 [Wallpaper Engine 说明](WALLPAPER-ENGINE.md)。
+- **保留背景音乐**：
+  - 仅保留「观测室（Observatory）」三轨同步循环背景配乐（[音频说明](../public/audio/README.md)），支持独立音乐开关与音量调节。已移除原 Wallpaper Engine 外部 128-bin 音频频谱律动。

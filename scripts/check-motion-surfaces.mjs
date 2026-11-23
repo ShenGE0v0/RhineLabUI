@@ -1,4 +1,4 @@
-// Run against built web and wallpaper previews. Uses the same environment as check-motion-integration.mjs.
+// Run against built web preview. Uses the same environment as check-motion-integration.mjs.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -62,61 +62,7 @@ try {
     return document.querySelector('#detail-ui').getAnimations().some(a => a.playState === 'running');
   }), 'UI fade remains available when only the 3D transition is disabled');
   await context.close();
-
-  const wall = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const wp = await wall.newPage(); watch(wp);
-  await wp.goto(process.env.WALLPAPER_URL || 'http://127.0.0.1:5176');
-  await wp.waitForFunction(() => window.rhine?.stats().ready);
-  await wp.evaluate(() => window.wallpaperPropertyListener.applyUserProperties({
-    boot: { value: false }, music: { value: false }, reduced: { value: false },
-    superperformance: { value: true }, desktopmode: { value: 'archive' },
-  }));
-  await wp.waitForFunction(() => window.rhine.stats().startup === 'started');
-  await wp.evaluate(() => window.rhine.detail());
-  await wp.waitForFunction(() => window.rhine.stats().cameraDetail > .95);
-  // Same-turn host updates exercise the transition before any animation can end naturally.
-  report.viewerEnter = await wp.evaluate(() => {
-    document.querySelector('[data-action="model-viewer"]').click();
-    window.wallpaperPropertyListener.applyUserProperties({ reduced: { value: true } });
-    const root = document.querySelector('.model-viewer');
-    return { state: root.dataset.transition, animations: root.getAnimations({ subtree: true }).filter(a => a instanceof Animation && !(a instanceof CSSAnimation) && !(a instanceof CSSTransition) && a.playState === 'running').length };
-  });
-  assert.deepEqual(report.viewerEnter, { state: 'open', animations: 0 });
-  await wp.waitForFunction(() => JSON.parse(document.querySelector('.model-viewer').dataset.stats || '{}').ready);
-  report.viewerExit = await wp.evaluate(() => {
-    window.wallpaperPropertyListener.applyUserProperties({ reduced: { value: false } });
-    document.querySelector('[data-viewer="close"]').click();
-    window.wallpaperPropertyListener.applyUserProperties({ reduced: { value: true } });
-    const root = document.querySelector('.model-viewer');
-    return { hidden: root.hidden, state: root.dataset.transition, focus: document.activeElement.dataset.action, detailInert: document.querySelector('#detail-ui').inert };
-  });
-  assert.deepEqual(report.viewerExit, { hidden: true, state: 'closed', focus: 'model-viewer', detailInert: false });
-  await wp.evaluate(() => {
-    window.wallpaperPropertyListener.applyUserProperties({ reduced: { value: false } });
-    document.querySelector('[data-action="model-viewer"]').click();
-  });
-  await wp.waitForFunction(() => JSON.parse(document.querySelector('.model-viewer').dataset.stats || '{}').ready && document.querySelector('.model-viewer').dataset.transition === 'open');
-  await wp.waitForTimeout(400);
-  assert.equal(await wp.locator('.model-viewer').evaluate(el => el.hidden), false, 'Stale close callback cannot close a reopened viewer');
-  await wp.locator('[data-viewer="close"]').click();
-  await wp.waitForFunction(() => document.querySelector('.model-viewer').hidden);
-  await settings(wp);
-  await wp.locator('[data-motion="surfaceTransitions"]').uncheck();
-  await closeSettings(wp);
-  await wp.locator('[data-action="model-viewer"]').click();
-  await wp.waitForFunction(() => document.querySelector('.viewer-canvas').getAnimations().some(a => a.playState === 'running' && a.effect.getTiming().duration === 380));
-  const modelOnly = await wp.evaluate(() => {
-    // An unrelated host save must not cancel a still-enabled model entry.
-    window.wallpaperPropertyListener.applyUserProperties({ archivecoverage: { value: 'standard' } });
-    const canvas = document.querySelector('.viewer-canvas');
-    const before = canvas.getAnimations().some(a => a.playState === 'running' && a.effect.getTiming().duration === 380);
-    window.wallpaperPropertyListener.applyUserProperties({ reduced: { value: true } });
-    const after = canvas.getAnimations().some(a => a.playState === 'running' && a.effect.getTiming().duration === 380);
-    return { before, after };
-  });
-  assert.deepEqual(modelOnly, { before: true, after: false });
-  await wall.close();
   assert.deepEqual(errors, []);
   await writeFile('.tools/motion-surfaces/report.json', JSON.stringify(report, null, 2));
-  console.log('Passed: independent UI/3D transitions, light text contrast, interrupted viewer enter/exit, focus restoration and immediate reopen; no page errors.');
+  console.log('Passed: independent UI/3D transitions and light text contrast; no page errors.');
 } finally { await browser.close(); }

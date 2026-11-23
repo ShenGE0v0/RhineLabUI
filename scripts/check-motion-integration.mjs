@@ -1,4 +1,4 @@
-// Run after both builds, with web preview :5190 and wallpaper server :5176.
+// Run after web build, with web preview :5190.
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
@@ -62,22 +62,6 @@ try {
  await page.waitForFunction(()=>document.querySelector('#inspection-marks').style.opacity==='1');
  assert.equal(await page.locator('.document-redaction-window').count(),0);
  await context.close();
- console.log('Web: 14 toggles, legacy/custom persistence, super performance coexistence, archive/returning frost, independent model/document reveal and viewer controls passed.');
- const wall=await browser.newContext({viewport:{width:1440,height:900}}), wp=await wall.newPage();watch(wp);
- await wp.goto(process.env.WALLPAPER_URL||'http://127.0.0.1:5176');await wp.waitForFunction(()=>window.rhine?.stats().ready);
- const apply=values=>wp.evaluate(values=>window.wallpaperPropertyListener.applyUserProperties(Object.fromEntries(Object.entries(values).map(([key,value])=>[key,{value}]))),values);
- await apply({boot:false,reduced:false,music:false,superperformance:true,hudparallax:true,hudtracking:true,desktopmode:'workbench'});
- await wp.waitForFunction(()=>window.rhine.stats().mode==='archive');await settings(wp);
- await wp.locator('[data-motion="pointerParallax"]').uncheck();await close(wp);await wp.mouse.move(1200,200);
- await wp.waitForFunction(()=>document.querySelector('#stage').dataset.hudTracking==='false');
- await settings(wp);await apply({reduced:true});
- assert.equal((await stats(wp)).motion.preset,'reduced');assert.equal(await wp.locator('[data-motion]:checked').count(),0);
- assert.equal((await stats(wp)).decryption.modelClarity,0,'Reduced preset keeps archive frosted');
- await apply({reduced:false});assert.equal(await wp.locator('[data-motion]:checked').count(),14);
- await wp.locator('[data-motion="surfaceTransitions"]').uncheck();await close(wp);
- await wp.locator('[data-action="toggle-three"]').click();await wp.waitForFunction(()=>window.rhine.stats().threeState==='off');
- await wp.locator('[data-action="toggle-three"]').click();await wp.waitForFunction(()=>window.rhine.stats().threeState==='on');
- assert.equal((await stats(wp)).motion.preset,'custom');assert.equal((await stats(wp)).superPerformance,true);
- await wall.close();assert.deepEqual(errors,[]);
- console.log('Wallpaper: independent HUD switch, host full/reduced conversion, live settings and scene release/reload passed; no page errors.');
+ assert.deepEqual(errors,[]);
+ console.log('Web: 14 toggles, legacy/custom persistence, super performance coexistence, archive/returning frost, independent model/document reveal and viewer controls passed; no page errors.');
 }finally{await browser.close();}

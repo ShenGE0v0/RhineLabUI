@@ -21,7 +21,6 @@ try {
   await page.waitForFunction(() => window.rhine.stats().startup === 'started');
   await page.evaluate(() => window.rhine.archive());
   await page.waitForTimeout(1000);
-  assert.equal((await stats()).wallpaper, null);
   assert.equal(await page.locator('.three-toggle').count(), 0);
   assert.equal(await page.evaluate(() => typeof window.wallpaperPropertyListener), 'undefined');
   await page.locator('[data-action="settings"]').click();

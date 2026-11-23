@@ -19,15 +19,12 @@ try{
   check('disable AO',()=>scene.setQuality({...scene.quality,aoSamples:0}));
   check('restore shared depth',()=>scene.setQuality({...scene.quality,aoSamples:32,aoResolution:1}));
   check('AA',()=>scene.setQuality({...scene.quality,antialias:'smaa'}));
-  check('release transition',()=>scene.setPresentationVisible(false));
-  check('reverse release',()=>scene.setPresentationVisible(true));
   await bench.prepare('static');
-  scene.setReduced(false);check('music wakes canvas',()=>scene.setPlayfield(true,{low:1,mid:.5,high:.2,activity:1},1,1,null,false));
   // Capacity growth must retain one shared buffer and a valid picking sphere.
   scene.ensureInstanceCapacity(scene.instanceCapacity*2);
   bench.draw();results.push({name:'grown buffers shared',rendered:scene.instances.every(i=>i.instanceMatrix===scene.instances[0].instanceMatrix)&&!!scene.instances[0].boundingSphere});
   return results;
  });
  for(const check of checks)assert.equal(check.rendered,check.name!=='unchanged',check.name);
- assert.deepEqual(errors,[]);await writeFile('verification/performance/invalidation.json',JSON.stringify({checks,errors},null,2));console.log('Invalidation, quality transitions, resuming music and shared capacity growth passed.');
+ assert.deepEqual(errors,[]);await writeFile('verification/performance/invalidation.json',JSON.stringify({checks,errors},null,2));console.log('Invalidation, quality transitions and shared capacity growth passed.');
 }finally{await browser.close();}

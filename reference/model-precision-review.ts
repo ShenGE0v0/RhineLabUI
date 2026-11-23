@@ -31,7 +31,6 @@ async function load() {
       last = now; frame++;
       if (scenario.value === 'navigate' && frame%60 === 0) b.scene.select((frame/60)%8);
       if (scenario.value === 'inspect') b.scene.targetRotation = .65*Math.sin(frame*.012);
-      if (scenario.value === 'music') b.scene.setPlayfield(true,{low:.5+.3*Math.sin(frame*.05),mid:.4+.2*Math.sin(frame*.07),high:.3+.2*Math.cos(frame*.09),activity:1},1,1,null,true);
       b.draw();
     }
     requestAnimationFrame(tick);
