@@ -69,19 +69,41 @@ export class SharedDepthBokeh extends BokehPass {
   private width = 1;
   private height = 1;
   private quad: FullScreenQuad;
+  private hardwareDepthMaterial: THREE.ShaderMaterial;
+  private hardwareDepthQuad: FullScreenQuad;
   constructor(scene: THREE.Scene, camera: THREE.Camera, params: BokehPassParameters, private source: () => SharedDepthAO) {
     super(scene, camera, params);
     this.quad = new FullScreenQuad(this.materialBokeh);
+    this.hardwareDepthMaterial = new THREE.ShaderMaterial({
+      defines: { ...this.materialBokeh.defines, DEPTH_PACKING: 0 },
+      uniforms: this.materialBokeh.uniforms,
+      vertexShader: this.materialBokeh.vertexShader,
+      fragmentShader: this.materialBokeh.fragmentShader,
+    });
+    this.hardwareDepthQuad = new FullScreenQuad(this.hardwareDepthMaterial);
   }
-  setSize(width: number, height: number) { super.setSize(width, height); this.width = width; this.height = height; }
+  setSize(width: number, height: number) {
+    super.setSize(width, height);
+    this.width = Math.max(1, Math.floor(width));
+    this.height = Math.max(1, Math.floor(height));
+  }
   render(renderer: THREE.WebGLRenderer, write: THREE.WebGLRenderTarget, read: THREE.WebGLRenderTarget, delta: number, mask: boolean) {
     const ao = this.source(), uniforms = this.uniforms as Record<string, {value: any}>;
-    // Lower resolution AO must retain the original full resolution depth pass.
-    if (!ao.enabled || ao.width !== this.width || ao.height !== this.height) {
+    let depthTexture: THREE.Texture | null = null;
+    let quad: FullScreenQuad | null = null;
+    if (ao.enabled && Math.floor(ao.width) === this.width && Math.floor(ao.height) === this.height) {
+      depthTexture = ao.normalRenderTarget.textures[1];
+      quad = this.quad;
+    } else if (!ao.enabled && read.depthTexture && Math.floor(read.width) === this.width && Math.floor(read.height) === this.height) {
+      depthTexture = read.depthTexture;
+      quad = this.hardwareDepthQuad;
+    }
+    if (!depthTexture || !quad) {
+      // Lower resolution AO (or missing hardware depth) must retain the original full resolution depth pass.
       return super.render(renderer, write, read, delta, mask);
     }
     const originalDepth = uniforms.tDepth.value;
-    uniforms.tDepth.value = ao.normalRenderTarget.textures[1];
+    uniforms.tDepth.value = depthTexture;
     uniforms.tColor.value = read.texture;
     uniforms.nearClip.value = (this.camera as THREE.PerspectiveCamera).near;
     uniforms.farClip.value = (this.camera as THREE.PerspectiveCamera).far;
@@ -89,8 +111,13 @@ export class SharedDepthBokeh extends BokehPass {
     renderer.autoClear = false;
     renderer.setRenderTarget(this.renderToScreen ? null : write);
     if (!this.renderToScreen) renderer.clear();
-    try { this.quad.render(renderer); }
+    try { quad.render(renderer); }
     finally { uniforms.tDepth.value = originalDepth; renderer.autoClear = autoClear; }
   }
-  dispose() { super.dispose(); this.quad.dispose(); }
+  dispose() {
+    super.dispose();
+    this.quad.dispose();
+    this.hardwareDepthQuad.dispose();
+    this.hardwareDepthMaterial.dispose();
+  }
 }

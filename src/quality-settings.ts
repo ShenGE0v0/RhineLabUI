@@ -1,5 +1,6 @@
 import {
   matchingPreset,
+  OVERVIEW_TRANSMISSION_LIMIT,
   presetLabels,
   type QualityPreset,
   type RenderQuality,
@@ -69,7 +70,7 @@ export function qualityMarkup(quality: RenderQuality) {
       quality,
       "transmission",
       "透明材质分辨率",
-      "控制盖板折射画面的清晰度",
+      `控制盖板折射清晰度。总览最高 ${OVERVIEW_TRANSMISSION_LIMIT * 100}%，详情与 360° 查看器使用所选比例`,
       [0.25, 0.5, 0.75, 1].map((v) => [v, `${v * 100}%`]),
     )}
     ${select(

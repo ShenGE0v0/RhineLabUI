@@ -18,7 +18,11 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
 import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
-import { normalizeQuality, type RenderQuality } from "./render-quality";
+import {
+  normalizeQuality,
+  OVERVIEW_TRANSMISSION_LIMIT,
+  type RenderQuality,
+} from "./render-quality";
 import { applyTextureQuality, resizeQuality } from "./quality-renderer";
 import { CardAppearance } from "./appearance";
 import { configureInternalOptics } from "./internal-optics";
@@ -172,6 +176,10 @@ const OVERVIEW_RECT_LIGHT_Y = -3.35;
 const OVERVIEW_RECT_LIGHT_Z_OFFSET = 0.12;
 const OVERVIEW_RECT_LIGHT_INTENSITY = 30;
 const REFERENCE_ROW_SPACING = 0.43;
+const MAX_OUTGOING_POOL = 4;
+const OUTGOING_NORMAL_RETURN_COUNT = 3;
+const OUTGOING_CATCH_UP_RATE = 18;
+const OUTGOING_FINISH_LIFT = 0.002;
 const UNDERLIGHT_SLOT_STRENGTH: Partial<Record<SurfaceRole, number>> = {
   acrylic: 0.03,
   glass: 0.024,
@@ -493,8 +501,7 @@ export class ArchiveScene {
     }
     this.cancelPointer();
     for (const { group } of this.outgoing) {
-      this.scene.remove(group);
-      this.disposeOutgoing(group);
+      this.releaseOutgoingGroup(group);
     }
     this.outgoing.length = 0;
     this.introRelease = null;
@@ -596,7 +603,41 @@ export class ArchiveScene {
     this.cameraInitialized = false;
     this.last = null;
     this.renderState.invalidate();
-    this.update(performance.now() / 1000);
+    const warmCell = {
+      lane: this.selectedCell.lane + 1,
+      row: this.selectedCell.row,
+    };
+    const warmOutgoing = this.bakedCardTexture
+      ? this.acquireOutgoingGroup()
+      : null;
+    if (warmOutgoing) {
+      this.appearance.apply(
+        warmOutgoing,
+        this.appearanceInSlot(
+          OVERVIEW_LIFT * 0.5,
+          this.slotUnderlights.directFor(warmCell),
+          1,
+        ),
+      );
+      this.appearance.setClarity(warmOutgoing, 0);
+      this.scene.add(warmOutgoing);
+      this.outgoing.push({
+        group: warmOutgoing,
+        slot: fileAtCell(warmCell),
+        cell: warmCell,
+        lift: { value: OVERVIEW_LIFT * 0.5, velocity: 0 },
+        returnY: null,
+      });
+    }
+    try {
+      this.update(performance.now() / 1000);
+    } finally {
+      if (warmOutgoing) {
+        const idx = this.outgoing.findIndex((o) => o.group === warmOutgoing);
+        if (idx >= 0) this.outgoing.splice(idx, 1);
+        this.releaseOutgoingGroup(warmOutgoing);
+      }
+    }
 
     // Pass 2: reset back to the flat intro frame 0 before revealing the stage.
     this.playIntro();
@@ -643,6 +684,11 @@ export class ArchiveScene {
       prewarm.clear();
     }
     this.outgoingPrewarm = [];
+    for (const pooled of this.outgoingPool) {
+      this.appearance.dispose(pooled);
+      pooled.clear();
+    }
+    this.outgoingPool = [];
     disposeThreeTree(this.scene);
     this.overviewBadgeTexture?.dispose();
     this.overviewBadgeTexture = undefined;
@@ -1211,6 +1257,7 @@ export class ArchiveScene {
   );
   private instances: THREE.InstancedMesh[] = [];
   private outgoingPrewarm: THREE.Group[] = [];
+  private outgoingPool: THREE.Group[] = [];
   private matrixUpdates?: InstanceUpdates;
   private slotLightUpdates?: InstanceUpdates;
   private neighborLightUpdates?: InstanceUpdates;
@@ -1365,6 +1412,7 @@ export class ArchiveScene {
       alpha: false,
       powerPreference: "high-performance",
     });
+    this.renderer.debug.checkShaderErrors = import.meta.env.DEV;
     this.renderer.setPixelRatio(
       Math.min(devicePixelRatio, 1.5) *
         Math.min(innerWidth / 1920, innerHeight / 1080),
@@ -1446,7 +1494,27 @@ export class ArchiveScene {
     this.cameraAim.set(-0.5, 1.1, 0.4);
     this.camera.fov = 6.15;
     this.camera.lookAt(this.cameraAim);
-    this.composer = new EffectComposer(this.renderer);
+    const composerSize = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    const composerDepth = new THREE.DepthTexture(
+      Math.max(1, composerSize.x),
+      Math.max(1, composerSize.y),
+    );
+    composerDepth.format = THREE.DepthFormat;
+    composerDepth.type = THREE.UnsignedIntType;
+    const composerTarget = new THREE.WebGLRenderTarget(
+      Math.max(1, composerSize.x),
+      Math.max(1, composerSize.y),
+      {
+        type: THREE.HalfFloatType,
+        depthTexture: composerDepth,
+      },
+    );
+    this.composer = new EffectComposer(this.renderer, composerTarget);
+    const logicalSize = this.renderer.getSize(new THREE.Vector2());
+    this.composer.setSize(
+      Math.max(1, logicalSize.x),
+      Math.max(1, logicalSize.y),
+    );
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.ao = new SharedDepthAO(
       this.scene,
@@ -1643,6 +1711,7 @@ export class ArchiveScene {
         continue;
       }
       const arrayMat = mat.clone();
+      arrayMat.side = THREE.FrontSide;
       if (role === "glass") {
         arrayMat.transmission = 0.78;
         if (this.lightingLook === "refined") {
@@ -1749,6 +1818,7 @@ export class ArchiveScene {
     this.overviewBadgeTexture = new THREE.CanvasTexture(
       this.overviewBadgeCanvas,
     );
+    // Hardware sRGB decoding keeps badge filtering in linear light.
     this.overviewBadgeTexture.colorSpace = THREE.SRGBColorSpace;
     this.overviewBadgeTexture.anisotropy =
       this.renderer.capabilities.getMaxAnisotropy();
@@ -2385,27 +2455,7 @@ export class ArchiveScene {
     const sameColumnRowSwitch =
       changed && cell.lane === previousCell.lane;
     if (changed && this.loaded && this.lift.value > 0.0001) {
-      const group = this.model.clone(true);
-      if (!this.bakedCardTexture) {
-        const label = group.children[group.children.length - 1] as THREE.Mesh;
-        const canvas = document.createElement("canvas");
-        canvas.width = this.labelCanvas.width;
-        canvas.height = this.labelCanvas.height;
-        canvas.getContext("2d")?.drawImage(this.labelCanvas, 0, 0);
-        const map = new THREE.CanvasTexture(canvas);
-        map.colorSpace = THREE.SRGBColorSpace;
-        label.material = new THREE.MeshBasicMaterial({
-          map,
-          toneMapped: false,
-          transparent: true,
-          depthWrite: false,
-        });
-      }
-      // Clone carries the selected material by reference. Replace it before
-      // installing appearance shaders, so they are not appended to the
-      // original material again on every selection.
-      this.appearance.prepare(group);
-      this.applyOverviewUnderlight(group, "neighbor");
+      const group = this.acquireOutgoingGroup();
       this.appearance.apply(
         group,
         this.appearanceInSlot(
@@ -2444,9 +2494,8 @@ export class ArchiveScene {
       this.lift = { ...o.lift };
       this.rotation = o.group.rotation.y;
       this.returnY = o.returnY;
-      this.scene.remove(o.group);
-      this.disposeOutgoing(o.group);
       this.outgoing.splice(returning, 1);
+      this.releaseOutgoingGroup(o.group);
     }
     if (sameColumnRowSwitch) {
       this.pendingPulse = null;
@@ -2474,6 +2523,54 @@ export class ArchiveScene {
       -MAX_FROZEN_SELECTION_PULSES,
     );
     this.pulses = [];
+  }
+  private createOutgoingGroup() {
+    const group = this.model.clone(true);
+    if (!this.bakedCardTexture) {
+      const label = group.children[group.children.length - 1] as THREE.Mesh;
+      const canvas = document.createElement("canvas");
+      canvas.width = this.labelCanvas.width;
+      canvas.height = this.labelCanvas.height;
+      canvas.getContext("2d")?.drawImage(this.labelCanvas, 0, 0);
+      const map = new THREE.CanvasTexture(canvas);
+      map.colorSpace = THREE.SRGBColorSpace;
+      label.material = new THREE.MeshBasicMaterial({
+        map,
+        toneMapped: false,
+        transparent: true,
+        depthWrite: false,
+      });
+    }
+    // Clone carries the selected material by reference. Replace it before
+    // installing appearance shaders, so they are not appended to the
+    // original material again on every selection.
+    this.appearance.prepare(group);
+    this.applyOverviewUnderlight(group, "neighbor");
+    return group;
+  }
+  private acquireOutgoingGroup() {
+    const pooled = this.bakedCardTexture ? this.outgoingPool.pop() : undefined;
+    if (pooled) {
+      pooled.visible = true;
+      pooled.position.copy(this.model.position);
+      pooled.rotation.copy(this.model.rotation);
+      pooled.scale.copy(this.model.scale);
+      return pooled;
+    }
+    return this.createOutgoingGroup();
+  }
+  private releaseOutgoingGroup(group: THREE.Group) {
+    this.scene.remove(group);
+    if (
+      this.bakedCardTexture &&
+      this.outgoingPool.length < MAX_OUTGOING_POOL
+    ) {
+      group.visible = false;
+      this.outgoingPool.push(group);
+      return;
+    }
+    this.disposeOutgoing(group);
+    group.clear();
   }
   private disposeOutgoing(group: THREE.Group) {
     this.appearance.dispose(group);
@@ -3206,6 +3303,11 @@ export class ArchiveScene {
     this.topRailLightUpdates = new InstanceUpdates(this.topRailLightAttribute);
     this.instanceCapacity = capacity;
   }
+  private get transmissionScale() {
+    return this.detail < 0.01 && !this.targetDetail
+      ? Math.min(this.quality.transmission, OVERVIEW_TRANSMISSION_LIMIT)
+      : this.quality.transmission;
+  }
   resize() {
     this.renderState.invalidate();
     const w = this.container.clientWidth,
@@ -3222,8 +3324,11 @@ export class ArchiveScene {
       Math.max(1, Math.floor(dimensions.height * this.quality.aoResolution)),
     );
     this.ao.setSharing(this.ao.enabled && this.bokeh.enabled && this.quality.aoResolution === 1 && !this.superPerformance);
+    const transmission = this.transmissionScale;
+    this.renderer.transmissionResolutionScale = transmission;
     this.container.dataset.renderQuality = JSON.stringify({
       ...this.readRenderMetrics(),
+      transmission,
       aoSamples: this.ao.enabled ? this.aoKernelSize : 0,
       aoWidth: this.ao.width,
       aoHeight: this.ao.height,
@@ -3946,6 +4051,8 @@ export class ArchiveScene {
     );
     // The array travels forward from behind the camera as the archive opens.
     const entryZ = -28 * (1 - this.reveal);
+    // Clear the backlog of older return animations without moving a card abruptly.
+    const fastReturnCount = this.outgoing.length - OUTGOING_NORMAL_RETURN_COUNT;
     for (let i = this.outgoing.length - 1; i >= 0; i--) {
       const o = this.outgoing[i];
       const p = this.cellPosition(o.cell);
@@ -3955,7 +4062,12 @@ export class ArchiveScene {
         o.lift.value = o.returnY - baseY;
         o.lift.velocity = 0;
         if (o.group.rotation.y === 0) o.returnY = null;
-      } else damp(o.lift, 0, this.motion.detailTransition ? 4.5 : 35, dt);
+      } else {
+        const rate = this.motion.detailTransition
+          ? (i < fastReturnCount ? OUTGOING_CATCH_UP_RATE : 4.5)
+          : 35;
+        damp(o.lift, 0, rate, dt);
+      }
       o.group.position.set(
         p.x - trackX,
         baseY +
@@ -3986,10 +4098,12 @@ export class ArchiveScene {
         0.024 *
         (1 - renderDetail) *
         (1 - quality);
-      if (o.lift.value < 0.0001 && Math.abs(o.group.rotation.y) < 0.0001) {
-        this.scene.remove(o.group);
-        this.disposeOutgoing(o.group);
+      if (
+        Math.abs(o.lift.value) < OUTGOING_FINISH_LIFT &&
+        Math.abs(o.group.rotation.y) < 0.001
+      ) {
         this.outgoing.splice(i, 1);
+        this.releaseOutgoingGroup(o.group);
       }
     }
     if (
@@ -4454,6 +4568,15 @@ export class ArchiveScene {
         LIGHT_OVERVIEW_APERTURE_DELTA * lightOverview) *
         this.quality.depthOfField) /
       100;
+    const transmission = this.transmissionScale;
+    if (this.renderer.transmissionResolutionScale !== transmission) {
+      this.renderer.transmissionResolutionScale = transmission;
+      this.container.dataset.renderQuality = JSON.stringify({
+        ...this.readRenderMetrics(),
+        transmission,
+      });
+      this.renderState.invalidate();
+    }
     this.renderer.info.reset();
     // Keep all simulation and picking current. Reuse the composited canvas only
     // when its actual inputs are identical, including late textures and materials.

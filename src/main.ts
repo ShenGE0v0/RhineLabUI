@@ -704,7 +704,8 @@ function updateQualitySummary() {
   // The metrics attribute is written by the scene; a malformed value must only
   // cost the extra detail, never the whole summary.
   const metrics = parseMetrics(canvas.parentElement?.dataset.renderQuality);
-  summary.textContent = `${superPerformanceEnabled() ? "超级性能模式已启用 · 画质设置暂被覆盖，关闭后恢复 · " : ""}实际渲染 ${canvas.width} × ${canvas.height} · ${effectiveRenderQuality().frameRate ? `${effectiveRenderQuality().frameRate} fps 上限` : "不限帧率"} · 当前 ${Math.round(fps)} fps · ${effectiveRenderQuality().antialias === "smaa" ? "SMAA" : "原始抗锯齿"} · 纹理 ${metrics.anisotropy ?? 1}×${metrics.limited ? " · 已达到缓冲上限" : ""}`;
+  const transmission = Math.round(scene.renderer.transmissionResolutionScale * 100);
+  summary.textContent = `${superPerformanceEnabled() ? "超级性能模式已启用 · 画质设置暂被覆盖，关闭后恢复 · " : ""}实际渲染 ${canvas.width} × ${canvas.height} · ${effectiveRenderQuality().frameRate ? `${effectiveRenderQuality().frameRate} fps 上限` : "不限帧率"} · 当前 ${Math.round(fps)} fps · ${effectiveRenderQuality().antialias === "smaa" ? "SMAA" : "原始抗锯齿"} · 纹理 ${metrics.anisotropy ?? 1}× · 折射 ${transmission}%${metrics.limited ? " · 已达到缓冲上限" : ""}`;
 }
 function motionPreferenceNoteMarkup() {
   const preset = prefs.motionPreset;
@@ -936,7 +937,8 @@ document.addEventListener("keydown", (e) => {
   }
   if (typing || modal || !ready) return;
   if (
-    (e.target as HTMLElement).dataset.tab &&
+    e.target instanceof HTMLElement &&
+    e.target.dataset.tab &&
     ["ArrowLeft", "ArrowRight"].includes(e.key)
   ) {
     e.preventDefault();
@@ -1020,7 +1022,15 @@ function frame(ms: number) {
     ? lastRenderedAt + Math.max(1, Math.floor((elapsed + tolerance) / interval)) * interval
     : ms;
   const time = ms / 1000;
+  const previousTransmission =
+    modal === "settings" ? scene?.renderer.transmissionResolutionScale : undefined;
   if (!viewer?.isOpen) scene?.update(time);
+  if (
+    previousTransmission !== undefined &&
+    previousTransmission !== scene?.renderer.transmissionResolutionScale
+  ) {
+    updateQualitySummary();
+  }
   viewer?.update(time);
   if (
     scene &&
