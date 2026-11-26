@@ -88,6 +88,7 @@ export function applyOverviewLook(
   badge: WebGLProgramParametersWithUniforms["uniforms"][string] | undefined,
   hoverBadge?: { instance: { value: number }; heightFraction: number },
   selectedHeadingEdge?: { value: number },
+  selectedBadgeHeightFraction?: { value: number },
 ) {
   if (role !== "glass" && role !== "acrylic" && role !== "frame" &&
       role !== "shell" && role !== "card" && role !== "engrave") return;
@@ -714,9 +715,15 @@ export function applyOverviewLook(
       shader.uniforms.archiveSelectedHeadingEdge = selectedHeadingEdge;
       shader.fragmentShader = "uniform float archiveSelectedHeadingEdge;\n" + shader.fragmentShader;
     }
+    if (!hoverBadge && selectedBadgeHeightFraction) {
+      shader.uniforms.archiveBadgeHeightFraction = selectedBadgeHeightFraction;
+      shader.fragmentShader = "uniform float archiveBadgeHeightFraction;\n" + shader.fragmentShader;
+    }
     const badgeUv = hoverBadge
       ? `vec2(faceUv.x, 1.0 - (1.0 - faceUv.y) / ${hoverBadge.heightFraction.toFixed(8)})`
-      : "faceUv";
+      : selectedBadgeHeightFraction
+        ? "vec2(faceUv.x, 1.0 - (1.0 - faceUv.y) / archiveBadgeHeightFraction)"
+        : "faceUv";
     const headingMask = selectedHeadingEdge
       ? "step(archiveSelectedHeadingEdge, faceUv.y)"
       : "1.0";

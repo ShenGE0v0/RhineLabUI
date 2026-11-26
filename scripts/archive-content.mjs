@@ -14,6 +14,16 @@ const requiredFields = [
 ];
 const isText = (value) => typeof value === "string" && value.trim().length > 0;
 
+export function localCoverPath(cover) {
+  if (!isText(cover) || /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(cover.trim())) return null;
+  const path = decodeURIComponent(cover.trim());
+  if (path.startsWith("/") || /[\\?#%\x00-\x1f]/.test(path) ||
+    path.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
+    throw new Error("本地相对路径不得以 / 开头、使用路径跳转或包含 URL 控制字符");
+  }
+  return path;
+}
+
 export function validateContent(content) {
   const errors = [];
   if (!content || typeof content !== "object" || Array.isArray(content)) {
@@ -68,6 +78,24 @@ export function validateContent(content) {
       if (!["https:", "http:"].includes(url.protocol)) throw new Error();
     } catch {
       errors.push(`${label}.source：必须是有效的 HTTP 或 HTTPS 链接`);
+    }
+    if (record.cover !== undefined) {
+      if (!isText(record.cover)) {
+        errors.push(`${label}.cover：若填写则必须是非空文本`);
+      } else if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(record.cover.trim())) {
+        try {
+          const coverUrl = new URL(record.cover);
+          if (!["https:", "http:"].includes(coverUrl.protocol)) throw new Error();
+        } catch {
+          errors.push(`${label}.cover：外链封面必须是有效的 HTTP 或 HTTPS 链接`);
+        }
+      } else {
+        try {
+          localCoverPath(record.cover);
+        } catch (error) {
+          errors.push(`${label}.cover：无效的本地封面路径（${error.message}）`);
+        }
+      }
     }
   });
   for (const name of columns) {

@@ -30,7 +30,30 @@ import {
   archiveColumns,
   columnFiles,
   fileLocation,
+  getArchiveBookmarkScope,
+  getArchiveDataVersion,
+  getArchiveDatasetSnapshot,
+  getArchiveDatasetVersion,
+  hasStableArchiveId,
+  resolveRecordCover,
+  setArchiveDataset,
+  setCoverResolver,
+  subscribeArchiveData,
+  updateArchiveRecord,
+  type ArchiveDataChangeEvent,
+  type ArchiveRecord,
 } from "./data";
+import {
+  createFetchAdapter,
+  resolveBootstrapDataset,
+  type FetchAdapterOptions,
+} from "./data-source";
+import {
+  modelProvider,
+  modelProviderAssetPath,
+  type ModelProvider,
+} from "./model-provider";
+import { BlockDissolveTitle } from "./block-dissolve-title";
 import { TerminalAudio } from "./audio";
 import { audioSettingsMarkup } from "./audio-settings";
 import {
@@ -70,6 +93,8 @@ $("#stage").innerHTML = `
     <div class="column-navigation"><button data-action="column-prev" aria-label="上一列">←</button><div><span id="column-number">COLUMN <span id="column-index">03</span> / 05</span><strong id="column-name">作品档案</strong></div><button data-action="column-next" aria-label="下一列">→</button></div>
     <div class="archive-hint"><kbd>←</kbd> <kbd>→</kbd> 切换列 <span>／</span> <kbd>↑</kbd> <kbd>↓</kbd> 前后档案 <span>／</span> <kbd>ENTER</kbd> 读取</div>
   </section>
+  <div id="clean-archive-title" class="clean-archive-title" aria-hidden="true"></div>
+  <div id="clean-title-live" class="clean-title-live" aria-live="polite" aria-atomic="true"></div>
   <section id="detail-ui" class="detail-ui" aria-label="档案内容" hidden>
     <button class="back-button" data-action="back">← <span>ARCHIVE OVERVIEW</span><small>ESC</small></button>
     <div class="object-caption"><span id="object-id">NO.001</span><div>DEMO ARCHIVE</div><small>DRAG TO INSPECT <span>↔</span></small><button class="viewer-open" data-action="model-viewer">360° 查看作品模型 <span>↗</span></button></div>
@@ -88,9 +113,11 @@ type Mode = "archive" | "detail";
 let mode: Mode = "archive",
   selected = 0,
   ready = false;
+let selectedId = records[selected].id;
+let selectedIdIsStable = hasStableArchiveId(selectedId);
 let modal: "search" | "saved" | "settings" | null = null,
   searchQuery = "",
-  filter = "全部档案";
+  filter = categories[0] ?? "全部作品";
 let activeTab = "overview";
 const reviewParams = new URLSearchParams(location.search);
 let toastTimer: ReturnType<typeof setTimeout>;
@@ -130,13 +157,29 @@ function writeLocal(key: string, value: unknown) {
     return false;
   }
 }
-/** Saved ids come from an older build or a hand-edited store; keep only strings. */
-function readSavedIds(): Set<string> {
-  const stored = readLocal<unknown>("rhine-saved", []);
-  if (!Array.isArray(stored)) return new Set();
-  return new Set(stored.filter((id): id is string => typeof id === "string"));
+const saved = new Set<string>();
+const bookmarkStores = new Map<string, Set<string>>();
+let bookmarkScope = getArchiveBookmarkScope();
+let bookmarkStore: { key: string; ids: Set<string> } | null = null;
+function loadDatasetBookmarks() {
+  bookmarkScope = getArchiveBookmarkScope();
+  const key = bookmarkScope === "builtin" ? "rhine-saved" :
+    bookmarkScope === null ? null : `rhine-saved:${bookmarkScope}`;
+  saved.clear();
+  bookmarkStore = null;
+  if (key === null) return;
+  let ids = bookmarkStores.get(key);
+  if (!ids) {
+    const stored = readLocal<unknown>(key, []);
+    ids = new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : []);
+    bookmarkStores.set(key, ids);
+  }
+  bookmarkStore = { key, ids };
+  for (const { id } of records) {
+    if (hasStableArchiveId(id) && ids.has(id)) saved.add(id);
+  }
 }
-const saved = readSavedIds();
+loadDatasetBookmarks();
 const storedPrefs = readLocal<
   Partial<{
     music: boolean;
@@ -170,6 +213,10 @@ const prefs = {
   ),
 };
 const motionActive = (key: MotionKey) => motionEnabled(prefs.motion, key);
+const hudMotionActive = (key: MotionKey, targetMode: Mode = mode) =>
+  !$("#stage").classList.contains("web-archive-clean") &&
+  targetMode === "archive" &&
+  motionActive(key);
 const motionIsReduced = () =>
   Object.values(prefs.motion).every((value) => !value);
 const rollingMotion = {
@@ -231,6 +278,32 @@ const rollingTitles = [
 ];
 const selectedCode = createRollingNumber($("#selected-code"), codeOptions);
 const hoverCode = createRollingNumber($("#hover-code"), codeOptions);
+let hoveredIndex: number | null = null;
+const cleanTitleLive = $("#clean-title-live");
+const cleanTitle = new BlockDissolveTitle({
+  root: $("#clean-archive-title"),
+  resolveProviderUrl: (provider) => assetUrl(modelProviderAssetPath(provider)),
+  initialTitle: records[selected]?.title ?? "",
+  initialProvider: modelProvider(records[selected]?.en ?? ""),
+});
+cleanTitleLive.textContent = records[selected]?.title ?? "";
+function syncCleanTitle(
+  animated = motionActive("rollingText") && mode === "archive",
+  announce = false,
+) {
+  const index =
+    mode === "archive" && hoveredIndex !== null ? hoveredIndex : selected;
+  const record = records[index];
+  const next = {
+    title: record?.title ?? "",
+    provider: modelProvider(record?.en ?? ""),
+    animated,
+  };
+  cleanTitle.update(next);
+  if (announce && cleanTitleLive.textContent !== next.title) {
+    cleanTitleLive.textContent = next.title;
+  }
+}
 const audio = new TerminalAudio();
 function configureAudio() {
   audio.configure(prefs);
@@ -262,7 +335,16 @@ if (entry) {
 let scene: ArchiveScene | undefined;
 let viewer: ModelViewer | undefined;
 const accessLog: { id: string; time: string }[] = [];
-const columnMemory = archiveColumns.map((_, lane) => columnFiles(lane)[0]);
+let columnMemory: number[] = [];
+function rebuildColumnMemory() {
+  columnMemory = archiveColumns.map((_, lane) => columnFiles(lane)[0] ?? 0);
+  if (records.length > 0 && selected >= 0 && selected < records.length) {
+    columnMemory[fileLocation(selected).lane] = selected;
+  }
+}
+rebuildColumnMemory();
+let datasetCustomized = false;
+let exportBlobUrl: string | undefined;
 function recordAccess() {
   accessLog.unshift({
     id: records[selected].id,
@@ -281,8 +363,10 @@ function effectiveRenderQuality() {
 }
 function savePrefs() {
   saveAudioPrefs();
-  if (!motionActive("rollingText"))
+  if (!motionActive("rollingText")) {
     rollingTitles.forEach((title) => title.finish());
+    cleanTitle.finish();
+  }
   if (!motionActive("rollingNumbers"))
     [fileCounter, columnCounter, selectedCode, hoverCode].forEach((counter) =>
       counter.finish(),
@@ -302,21 +386,21 @@ function savePrefs() {
   syncQualityUI(prefs.rendering);
   updateQualitySummary();
   fileCounter.update({
-    animated: motionActive("rollingNumbers") && mode === "archive",
+    animated: hudMotionActive("rollingNumbers"),
   });
   rollingTitles.forEach((title) =>
     title.update({
-      animated: motionActive("rollingText") && mode === "archive",
+      animated: hudMotionActive("rollingText"),
     }),
   );
   columnCounter.update({
-    animated: motionActive("rollingNumbers") && mode === "archive",
+    animated: hudMotionActive("rollingNumbers"),
   });
   selectedCode.update({
-    animated: motionActive("rollingNumbers") && mode === "archive",
+    animated: hudMotionActive("rollingNumbers"),
   });
   hoverCode.update({
-    animated: motionActive("rollingNumbers") && mode === "archive",
+    animated: hudMotionActive("rollingNumbers"),
   });
   $("#stage").classList.toggle("reduce-motion", motionIsReduced());
   $("#stage").classList.toggle(
@@ -365,6 +449,7 @@ function fit() {
     scene?.resize();
     viewer?.resize();
   }
+  cleanTitle.resize();
   updateQualitySummary();
 }
 window.addEventListener("resize", fit);
@@ -379,12 +464,31 @@ window.visualViewport?.addEventListener("resize", fit);
 window.visualViewport?.addEventListener("scroll", fit);
 matchMedia("(pointer: coarse)").addEventListener("change", fit);
 fit();
-$("#file-ticks").innerHTML = columnFiles(fileLocation(selected).lane)
-  .map((index) => `<button data-select="${index}"></button>`)
-  .join("");
-const fileTicks = [
-  ...$("#file-ticks").querySelectorAll<HTMLButtonElement>("button"),
-];
+const fileTicksRoot = $("#file-ticks");
+let fileTicks: HTMLButtonElement[] = [];
+function syncFileTicks(files: number[]) {
+  if (fileTicks.length !== files.length) {
+    fileTicksRoot.innerHTML = files
+      .map((index) => `<button data-select="${index}"></button>`)
+      .join("");
+    fileTicks = [
+      ...fileTicksRoot.querySelectorAll<HTMLButtonElement>("button"),
+    ];
+  }
+  fileTicks.forEach((button, slot) => {
+    const index = files[slot],
+      record = records[index];
+    if (!record) return;
+    button.dataset.select = String(index);
+    button.setAttribute(
+      "aria-label",
+      `选择档案 ${record.id} ${record.title}`,
+    );
+    button.title = `${record.id} · ${record.title}`;
+    button.classList.toggle("selected", index === selected);
+    button.setAttribute("aria-pressed", String(index === selected));
+  });
+}
 
 function focusArchiveOverview() {
   if (mode !== "archive") return;
@@ -395,11 +499,14 @@ function setMode(next: Mode) {
   const previousMode = mode;
   rollingTitles.forEach((title) =>
     title.update({
-      animated: motionActive("rollingText") && next === "archive",
+      animated: hudMotionActive("rollingText", next),
     }),
   );
   if (next !== "archive") {
     rollingTitles.forEach((title) => title.finish());
+    hoveredIndex = null;
+    syncCleanTitle(false);
+    cleanTitle.finish();
     hoverCode.finish();
     $("#hover-label").hidden = true;
   }
@@ -424,7 +531,7 @@ function setMode(next: Mode) {
   }
 }
 function select(index: number, navigation?: ArchiveNavigation) {
-  selected = (index + records.length) % records.length;
+  selected = wrap(Math.trunc(index), records.length);
   columnMemory[fileLocation(selected).lane] = selected;
   if (mode === "detail") setMode("archive");
   activeTab = "overview";
@@ -435,30 +542,38 @@ function stepFile(direction: number) {
   const files = columnFiles(fileLocation(selected).lane);
   if (files.length < 2) return;
   select(
-    files[(files.indexOf(selected) + direction + files.length) % files.length],
+    files[wrap(files.indexOf(selected) + direction, files.length)],
     { axis: "row", direction },
   );
 }
 function stepColumn(direction: number) {
+  if (archiveColumns.length < 2) return;
   const lane = fileLocation(selected).lane;
   const next = wrap(lane + direction, archiveColumns.length);
   select(columnMemory[next], { axis: "lane", direction });
 }
-function updateSelection(navigation?: ArchiveNavigation) {
+function updateSelection(
+  navigation?: ArchiveNavigation,
+  animateTitle = motionActive("rollingText") && mode === "archive",
+) {
   const r = records[selected];
+  selectedId = r.id;
+  selectedIdIsStable = hasStableArchiveId(selectedId);
   const { lane } = fileLocation(selected);
   const files = columnFiles(lane);
+  const hudTextAnimated = hudMotionActive("rollingText");
+  const hudNumberAnimated = hudMotionActive("rollingNumbers");
   selectionTitle.update({
     text: r.title,
-    animated: motionActive("rollingText") && mode === "archive",
+    animated: hudTextAnimated,
   });
   clearanceTitle.update({
     text: r.clearance,
-    animated: motionActive("rollingText") && mode === "archive",
+    animated: hudTextAnimated,
   });
   categoryTitle.update({
     text: r.category,
-    animated: motionActive("rollingText") && mode === "archive",
+    animated: hudTextAnimated,
   });
   const direction =
     navigation && "axis" in navigation
@@ -466,14 +581,18 @@ function updateSelection(navigation?: ArchiveNavigation) {
         ? "up"
         : "down"
       : "auto";
+  const idDigitsMatch = r.id.match(/\d+$/);
+  const idCodeValue = idDigitsMatch ? Number(idDigitsMatch[0]) : selected + 1;
   selectedCode.update({
-    value: Number(r.id.slice(2)),
-    animated: motionActive("rollingNumbers") && mode === "archive",
+    value: Number.isFinite(idCodeValue) ? idCodeValue : selected + 1,
+    animated: hudNumberAnimated,
     direction,
   });
+  hoveredIndex = null;
+  syncCleanTitle(animateTitle, true);
   fileCounter.update({
     value: files.indexOf(selected) + 1,
-    animated: motionActive("rollingNumbers") && mode === "archive",
+    animated: hudNumberAnimated,
     direction:
       navigation && "axis" in navigation && navigation.axis === "row"
         ? direction
@@ -482,7 +601,7 @@ function updateSelection(navigation?: ArchiveNavigation) {
   $(".count-total").textContent = String(files.length).padStart(2, "0");
   columnCounter.update({
     value: lane + 1,
-    animated: motionActive("rollingNumbers") && mode === "archive",
+    animated: hudNumberAnimated,
     direction:
       navigation && "axis" in navigation && navigation.axis === "lane"
         ? direction
@@ -490,19 +609,11 @@ function updateSelection(navigation?: ArchiveNavigation) {
   });
   columnTitle.update({
     text: archiveColumns[lane],
-    animated: motionActive("rollingText") && mode === "archive",
+    animated: hudTextAnimated,
   });
   $<HTMLButtonElement>('[data-action="column-prev"]').disabled = false;
   $<HTMLButtonElement>('[data-action="column-next"]').disabled = false;
-  fileTicks.forEach((button, slot) => {
-    const index = files[slot],
-      record = records[index];
-    button.dataset.select = String(index);
-    button.setAttribute("aria-label", `选择档案 ${record.id} ${record.title}`);
-    button.title = `${record.id} · ${record.title}`;
-    button.classList.toggle("selected", index === selected);
-    button.setAttribute("aria-pressed", String(index === selected));
-  });
+  syncFileTicks(files);
   $("#saved-count").textContent = String(saved.size).padStart(2, "0");
 }
 function openFile() {
@@ -515,7 +626,11 @@ function toggleSaved() {
   const id = records[selected].id;
   if (saved.has(id)) saved.delete(id);
   else saved.add(id);
-  writeLocal("rhine-saved", [...saved]);
+  if (bookmarkStore && hasStableArchiveId(id)) {
+    if (saved.has(id)) bookmarkStore.ids.add(id);
+    else bookmarkStore.ids.delete(id);
+    writeLocal(bookmarkStore.key, [...bookmarkStore.ids]);
+  }
   $("#saved-count").textContent = String(saved.size).padStart(2, "0");
   const button = $<HTMLButtonElement>('[data-action="bookmark"]');
   const added = saved.has(id);
@@ -532,19 +647,34 @@ function toggleSaved() {
     );
   notify(saved.has(id) ? "档案已加入收藏" : "已取消收藏");
 }
+function formatArchiveExport(r: ArchiveRecord) {
+  return `\uFEFFDEEPDEMOS · AI DEMO ARCHIVE\nFILE ${r.id} / ${r.title}\n${r.en}\n\n平台：${r.department}\n收录日期：${r.date}\n作者：${r.lead}\n类型：${r.clearance}\n\n${r.abstract}\n\n作品记录\n${r.findings.map((f, i) => `${i + 1}. ${f}`).join("\n")}\n\n来源：${r.source || "无"}\n`;
+}
 function renderDetail() {
   tabTransition.cancel();
+  if (exportBlobUrl) {
+    URL.revokeObjectURL(exportBlobUrl);
+    exportBlobUrl = undefined;
+  }
   const r = records[selected];
+  const exportHref = datasetCustomized
+    ? (exportBlobUrl = URL.createObjectURL(
+        new Blob([formatArchiveExport(r)], {
+          type: "text/plain;charset=utf-8",
+        }),
+      ))
+    : assetUrl(`archives/DEEPDEMOS-${encodeURIComponent(r.id)}.txt`);
+  const safeId = escapeHtml(r.id);
   $("#object-id").textContent = "NO." + String(selected + 1).padStart(3, "0");
   $("#detail-content").innerHTML = `
-  <div class="detail-kicker"><span>FILE ${r.id}</span><span>${escapeHtml(r.clearance)}</span></div>
+  <div class="detail-kicker"><span>FILE ${safeId}</span><span>${escapeHtml(r.clearance)}</span></div>
   <h2>${escapeHtml(r.title)}</h2><div class="detail-title-cn">${escapeHtml(r.en)}<span>${escapeHtml(r.category)}</span></div>
   <div class="detail-rule"></div>
   <dl class="metadata"><div><dt>PLATFORM / 平台</dt><dd>${escapeHtml(r.department)}</dd></div><div><dt>DATE / 收录日期</dt><dd>${escapeHtml(r.date)}</dd></div><div><dt>AUTHOR / 作者</dt><dd>${escapeHtml(r.lead)}</dd></div><div><dt>TYPE / 类型</dt><dd><i></i>${r.clearance === "LINK" ? "外链作品" : "网页 Demo · 可运行"}</dd></div></dl>
   <div class="detail-tabs" role="tablist"><button id="tab-overview" class="active" role="tab" aria-controls="tab-panel" aria-selected="true" data-tab="overview">01 <span>概述</span></button><button id="tab-notes" role="tab" aria-controls="tab-panel" aria-selected="false" data-tab="notes">02 <span>作品记录</span></button><button id="tab-history" role="tab" aria-controls="tab-panel" aria-selected="false" data-tab="history">03 <span>收录信息</span></button><i class="tab-indicator" aria-hidden="true"></i></div>
   <div id="tab-panel" class="tab-panel" role="tabpanel">${overview()}</div>
-  <div class="detail-actions"><button class="solid-button" data-action="bookmark">${saved.has(r.id) ? "− REMOVE FROM SAVED" : "＋ SAVE ARCHIVE"}<span>${saved.has(r.id) ? "已收藏" : "收藏档案"}</span></button><a class="export-button" href="${assetUrl(`archives/DEEPDEMOS-${r.id}.txt`)}" download="DEEPDEMOS-${r.id}.txt" aria-label="导出 ${r.id} 档案">EXPORT <span>↓</span></a></div>
-  <div class="detail-footnote"><a href="${escapeHtml(r.source)}" target="_blank" rel="noopener">设定参考 ↗</a><span>${String(selected + 1).padStart(3, "0")} / ${String(records.length).padStart(3, "0")}</span></div>`;
+  <div class="detail-actions"><button class="solid-button" data-action="bookmark">${saved.has(r.id) ? "− REMOVE FROM SAVED" : "＋ SAVE ARCHIVE"}<span>${saved.has(r.id) ? "已收藏" : "收藏档案"}</span></button><a class="export-button" href="${exportHref}" download="DEEPDEMOS-${safeId}.txt" aria-label="导出 ${safeId} 档案">EXPORT <span>↓</span></a></div>
+  <div class="detail-footnote">${r.source ? `<a href="${escapeHtml(r.source)}" target="_blank" rel="noopener">设定参考 ↗</a>` : `<span>ARCHIVE RECORD</span>`}<span>${String(selected + 1).padStart(3, "0")} / ${String(records.length).padStart(3, "0")}</span></div>`;
   $("#detail-content").setAttribute("tabindex", "-1");
   $('[data-action="bookmark"]').setAttribute(
     "aria-pressed",
@@ -599,7 +729,7 @@ function notify(message: string) {
 }
 
 function openModal(kind: NonNullable<typeof modal>) {
-  if (!ready) return;
+  if (!ready || modalClosing) return;
   if (!modal) {
     previousFocus = document.activeElement as HTMLElement;
     modalSiblings = [...$("#stage").children]
@@ -613,7 +743,7 @@ function openModal(kind: NonNullable<typeof modal>) {
   modalClosing = false;
   modal = kind;
   searchQuery = "";
-  filter = "全部档案";
+  filter = categories[0] ?? "全部作品";
   renderModal();
 }
 function closeModal(afterClose?: () => void) {
@@ -637,7 +767,7 @@ function closeModal(afterClose?: () => void) {
   });
 }
 function renderModal() {
-  if (!modal) return;
+  if (!modal || modalClosing) return;
   modalTransition?.dispose();
   $("#modal-root").innerHTML =
     `<div class="modal-backdrop"><section class="terminal-modal ${modal === "settings" ? "settings-modal" : ""}" role="dialog" aria-modal="true" aria-label="${modal === "settings" ? "系统设置" : modal === "saved" ? "收藏档案" : "档案检索"}"><div class="modal-top"><span>DEEPDEMOS / ${modal === "settings" ? "SYSTEM PREFERENCES" : "ARCHIVE DIRECTORY"}</span><button data-action="close-modal" aria-label="关闭窗口">CLOSE <span>×</span></button></div>${modal === "settings" ? settingsMarkup() : `<h2>${modal === "saved" ? "SAVED ARCHIVES" : "ARCHIVE INDEX"}<small>${modal === "saved" ? "收藏作品" : "作品检索"}</small></h2><div class="search-field"><span>⌕</span><input id="archive-search" type="search" autocomplete="off" placeholder="输入作品编号、名称或模型" aria-label="检索档案"/><span class="key">ESC</span></div><div class="category-filters">${categories.map((c, i) => `<button data-filter="${escapeHtml(c)}" class="${i === 0 ? "active" : ""}">${escapeHtml(c)}</button>`).join("")}</div><div class="result-header"><span>FILE / 作品</span><span>PLATFORM / 平台</span><span>ACCESS</span></div><div id="search-results" class="search-results"></div><div class="modal-bottom"><span id="result-count"></span><span>DEMO ARCHIVE <i>●</i> CONNECTED</span></div>`}</section></div>`;
@@ -647,6 +777,7 @@ function renderModal() {
   modalTransition.show(!motionActive("surfaceTransitions"));
   if (modal === "settings") updateQualitySummary();
   if (modal !== "settings") {
+    $<HTMLInputElement>("#archive-search").value = searchQuery;
     renderResults();
     requestAnimationFrame(() => {
       if (backdrop.isConnected && !modalClosing) $("#archive-search").focus();
@@ -663,12 +794,14 @@ function renderModal() {
     });
 }
 function renderResults() {
+  if (modalClosing || (modal !== "search" && modal !== "saved")) return;
+  const allLabel = categories[0] ?? "全部作品";
   const results = records
     .map((r, i) => ({ r, i }))
     .filter(
       ({ r }) =>
         (modal !== "saved" || saved.has(r.id)) &&
-        (filter === "全部档案" || r.category === filter) &&
+        (filter === allLabel || r.category === filter) &&
         `${r.id} ${r.title} ${r.en} ${r.department} ${r.lead}`
           .toLowerCase()
           .includes(searchQuery.toLowerCase()),
@@ -677,7 +810,7 @@ function renderResults() {
     ? results
         .map(
           ({ r, i }) =>
-            `<button class="result-row" data-result="${i}"><span class="result-name"><b>${r.id}</b><span>${escapeHtml(r.title)}<small>${escapeHtml(r.en)}</small></span>${saved.has(r.id) ? "<i>＋</i>" : ""}</span><span>${escapeHtml(r.department)}</span><span>${r.clearance === "RESTRICTED" ? "CATALOG ONLY" : "AUTHORIZED"} <i>↗</i></span></button>`,
+            `<button class="result-row" data-result="${i}"><span class="result-name"><b>${escapeHtml(r.id)}</b><span>${escapeHtml(r.title)}<small>${escapeHtml(r.en)}</small></span>${saved.has(r.id) ? "<i>＋</i>" : ""}</span><span>${escapeHtml(r.department)}</span><span>${r.clearance === "RESTRICTED" ? "CATALOG ONLY" : "AUTHORIZED"} <i>↗</i></span></button>`,
         )
         .join("")
     : `<div class="empty-results"><span>∅</span><strong>${modal === "saved" && !searchQuery ? "尚无收藏作品" : "没有匹配的作品"}</strong><p>${modal === "saved" && !searchQuery ? "浏览作品时，选择 SAVE ARCHIVE 将其保存在此处。" : "尝试其他名称、作品编号，或切换分类。"}</p><button data-action="reset-search">${modal === "saved" ? "查看全部作品 →" : "重置检索 →"}</button></div>`;
@@ -816,8 +949,11 @@ document.addEventListener("click", (e) => {
     return;
   }
   if (el.dataset.result) {
-    const index = Number(el.dataset.result);
+    const record = records[Number(el.dataset.result)];
+    if (!record) return;
     closeModal(() => {
+      const index = records.indexOf(record);
+      if (index < 0) return;
       select(index);
       openFile();
     });
@@ -880,7 +1016,7 @@ document.addEventListener("click", (e) => {
   if (action === "reset-search") {
     modal = "search";
     searchQuery = "";
-    filter = "全部档案";
+    filter = categories[0] ?? "全部作品";
     renderModal();
   }
   if (action === "enable-motion") {
@@ -1076,6 +1212,17 @@ function bindScene(scene: ArchiveScene) {
     if (i !== selected) select(i);
     openFile();
   };
+  scene.onHover = (i) => {
+    if (mode !== "archive" || modal || viewer?.isOpen) {
+      if (hoveredIndex !== null) {
+        hoveredIndex = null;
+        syncCleanTitle(false);
+      }
+      return;
+    }
+    hoveredIndex = i;
+    syncCleanTitle();
+  };
   scene.onNavigate = (axis, direction) => {
     if (mode !== "archive" || modal || viewer?.isOpen) return;
     if (axis === "lane") stepColumn(direction);
@@ -1083,27 +1230,143 @@ function bindScene(scene: ArchiveScene) {
   };
 }
 
+function prewarmDatasetProviders() {
+  if (reviewParams.get("scene") === "detail") return;
+  const initialProvider = modelProvider(records[selected]?.en ?? "");
+  cleanTitle.prewarmProviders(
+    new Set(
+      records
+        .map((record) => modelProvider(record.en))
+        .filter(
+          (p): p is ModelProvider => Boolean(p) && p !== initialProvider,
+        ),
+    ),
+  );
+}
+let bootstrapRequest: AbortController | undefined;
+let datasetRequest: AbortController | undefined;
+let syncedDataVersion = getArchiveDataVersion();
+let syncedDatasetVersion = getArchiveDatasetVersion();
+
+function syncDatasetLayout(nextIndex: number) {
+  selected = nextIndex;
+  hoveredIndex = null;
+  filter = categories[0] ?? "全部作品";
+  rebuildColumnMemory();
+  scene?.reloadData(selected);
+  updateSelection(undefined, false);
+  if (mode === "detail") renderDetail();
+  if (modal === "search" || modal === "saved") renderModal();
+  if (started) prewarmDatasetProviders();
+}
+
+function syncArchiveData(event: ArchiveDataChangeEvent) {
+  datasetCustomized = true;
+  const missedUpdate = event.version !== syncedDataVersion + 1;
+  syncedDataVersion = event.version;
+  if (event.datasetVersion !== syncedDatasetVersion) {
+    syncedDatasetVersion = event.datasetVersion;
+    bootstrapRequest?.abort();
+    datasetRequest?.abort();
+    if (viewer?.isOpen) viewer.close();
+    const sameScope = bookmarkScope !== null && bookmarkScope === getArchiveBookmarkScope();
+    const preservedIndex = sameScope && selectedIdIsStable && hasStableArchiveId(selectedId)
+      ? records.findIndex((record) => record.id === selectedId)
+      : -1;
+    if (!sameScope) accessLog.length = 0;
+    loadDatasetBookmarks();
+    syncDatasetLayout(Math.max(0, preservedIndex));
+  } else if (event.kind === "cover-resolver") {
+    if (missedUpdate) syncDatasetLayout(selected);
+    else scene?.reloadData(selected);
+  } else if (event.kind === "update") {
+    const { previousRecord, previousStableId, updatedIndex, layoutChanged, statsChanged } = event;
+    const updated = records[updatedIndex];
+    if (previousRecord.id !== updated.id && saved.delete(previousRecord.id)) {
+      saved.add(updated.id);
+      if (bookmarkStore) {
+        const removed = previousStableId && bookmarkStore.ids.delete(previousRecord.id);
+        const persist = hasStableArchiveId(updated.id);
+        if (persist) bookmarkStore.ids.add(updated.id);
+        if (removed || persist) writeLocal(bookmarkStore.key, [...bookmarkStore.ids]);
+      }
+    }
+    if (updatedIndex === selected && viewer?.isOpen) viewer.close();
+    if (layoutChanged || missedUpdate) {
+      syncDatasetLayout(selected);
+    } else {
+      scene?.refreshRecord(updatedIndex, {
+        coverChanged: resolveRecordCover(previousRecord, updatedIndex) !== resolveRecordCover(updated, updatedIndex),
+        statsChanged,
+      });
+      if (updatedIndex === selected) {
+        updateSelection(undefined, false);
+        if (mode === "detail") renderDetail();
+      } else if (updatedIndex === hoveredIndex) syncCleanTitle(false);
+      renderResults();
+    }
+  }
+  window.dispatchEvent(
+    new CustomEvent("rhine:data-change", {
+      detail: getArchiveDatasetSnapshot(),
+    }),
+  );
+}
+
+async function loadExternalDataset(url: string, options?: FetchAdapterOptions) {
+  const adapter = createFetchAdapter(url, options);
+  bootstrapRequest?.abort();
+  datasetRequest?.abort();
+  const request = new AbortController();
+  datasetRequest = request;
+  try {
+    const payload = await adapter.load(request.signal);
+    if (request.signal.aborted) throw request.signal.reason;
+    datasetRequest = undefined;
+    return setArchiveDataset(payload);
+  } finally {
+    if (datasetRequest === request) datasetRequest = undefined;
+  }
+}
+
 async function start() {
   try {
+    const request = new AbortController();
+    bootstrapRequest = request;
+    const bootstrapPromise = resolveBootstrapDataset(reviewParams, request.signal);
     scene = new ArchiveScene($("#three-scene"));
-    await Promise.all([
+    const [, bootstrapDataset] = await Promise.all([
       scene.load(),
+      bootstrapPromise,
       // With unicode-range faces, preload the brand characters, not every
       // font shard. Other archive text loads on demand.
       document.fonts.load(
         "600 20px MiSans",
         "AI DEMO ARCHIVE ANALYSIS OS",
       ),
-      document.fonts.load("700 20px MiSans", "DEEPDEMOS"),
     ]);
+    bootstrapRequest = undefined;
+    if (bootstrapDataset && !request.signal.aborted) {
+      try {
+        setArchiveDataset(bootstrapDataset);
+      } catch (error) {
+        console.warn("[archive] 外部启动数据集注入失败，保持内置演示数据。", error);
+      }
+    }
+    await document.fonts.load(
+      "700 28px MiSans",
+      `DEEPDEMOS ${records[selected]?.title ?? ""}`,
+    );
     bindScene(scene);
     savePrefs();
-    select(0);
+    select(selected);
     if (reviewParams.get("scene") !== "detail") await scene.warmUpOverview();
     ready = true;
     if (entry) entry.ready();
     else completeStartup(false);
   } catch (error) {
+    bootstrapRequest?.abort();
+    bootstrapRequest = undefined;
     console.error(error);
     $("#loading").innerHTML =
       '<div class="error-state"><strong>CONNECTION INTERRUPTED</strong><p>三维档案资源未能载入。请确认浏览器已启用硬件加速，然后重新连接。</p><button onclick="location.reload()">RECONNECT →</button></div>';
@@ -1136,11 +1399,15 @@ function completeStartup(musicDisabled: boolean) {
   frameCount = 0;
   lastRenderedAt = -Infinity;
   requestAnimationFrame(frame);
+  if (reviewParams.get("scene") !== "detail") {
+    setTimeout(() => prewarmDatasetProviders(), 3500);
+  }
   // Do not compete with entry audio/font downloads or the 3.2 s overview
   // intro animation. Full offline installation begins once settled.
   setTimeout(() => void initPwa(notify), 4500);
 }
 updateSelection();
+const stopDataSync = subscribeArchiveData(syncArchiveData);
 void start();
 enableGamepad();
 const ARCHIVE_HINT: Record<"keyboard" | "gamepad", string> = {
@@ -1152,11 +1419,13 @@ onInputDevice((device) => {
   if (hint) hint.innerHTML = ARCHIVE_HINT[device];
 });
 // Deterministic review controls: the running application, never a video surrogate.
-Object.assign(window, {
-  rhine: {
+const rhine = {
     archive: () => setMode("archive"),
     detail: () => openFile(),
-    select: (i: number) => select(i),
+    select: (i: number) => {
+      if (!records.length || !Number.isFinite(i)) return;
+      select(i);
+    },
     replayIntro: () => scene?.playIntro(),
     slotLightGain: (gain: number) => scene?.setOverviewSlotLightGain(gain),
     setCardPhoto: (src: string | null, index?: number) =>
@@ -1169,6 +1438,11 @@ Object.assign(window, {
       } | null,
       index?: number,
     ) => scene?.setCardStats(stats, index),
+    setData: setArchiveDataset,
+    loadData: loadExternalDataset,
+    updateRecord: updateArchiveRecord,
+    setCoverResolver,
+    getData: getArchiveDatasetSnapshot,
     stats: () => ({
       ...scene?.getStats(),
       fps: Math.round(fps),
@@ -1176,10 +1450,23 @@ Object.assign(window, {
       ready,
       startup: started ? "started" : (entry?.phase ?? "loading"),
       motion: { reduced: motionIsReduced(), preset: prefs.motionPreset },
-      selected: records[selected].id,
+      selected: records[selected]?.id ?? "",
       saved: [...saved],
       audio: audio.stats(),
     }),
-  },
-});
-if (import.meta.hot) import.meta.hot.dispose(() => audio.dispose());
+};
+declare global {
+  interface Window {
+    rhine: typeof rhine;
+  }
+}
+window.rhine = rhine;
+if (import.meta.hot)
+  import.meta.hot.dispose(() => {
+    stopDataSync();
+    bootstrapRequest?.abort();
+    datasetRequest?.abort();
+    if (exportBlobUrl) URL.revokeObjectURL(exportBlobUrl);
+    cleanTitle.finish();
+    audio.dispose();
+  });

@@ -1,10 +1,10 @@
 # 修改档案内容
 
-[`archives.json`](archives.json) 是三维卡面、网页检索、详情面板与 TXT 下载共用的唯一档案数据源。日常更新或新增内容无需修改 TypeScript（`src/data.ts` 只负责类型定义与阵列位置映射）。
+[`archives.json`](archives.json) 是当前内置演示数据的静态源文件（三维卡面、网页检索、详情面板与 TXT 下载共用）；运行时接入动态/外部数据请见 [外部数据接入指南](../docs/DATA-INTEGRATION.md)。日常更新内置演示内容无需修改 TypeScript（`src/data.ts` 负责数据归一化与动态存储）。
 
 ## 文件结构
 
-- `categories`：检索筛选器的五个分类，按显示顺序排列。“全部档案”由界面自动添加，无需填写。
+- `categories`：检索筛选器的五个分类，按显示顺序排列。“全部作品”由界面自动添加，无需填写。
 - `columns`：三维阵列从左到右对应的五个分类，必须与 `categories` 包含相同的五个名称（顺序可不同）。
 - `records`：固定四十份档案，按 `X-001` 至 `X-040` 顺序排列。每个分类下必须恰好有八份，同分类在数组中的顺序决定列内顺序。
 
@@ -23,7 +23,7 @@
 | `abstract` | 是 | 作品简介 |
 | `findings` | 是 | 补充说明字符串数组（至少包含一条非空文本） |
 | `source` | 是 | DeepDemos 作品原页完整 HTTP 或 HTTPS 链接 |
-| `cover` | 否 | DeepDemos 作品封面图 URL（加载后裁切铺入卡面中部展示框） |
+| `cover` | 否 | 作品封面图路径（当前 40 份已同步至 `public/assets/covers/` 同源托管，如 `assets/covers/X-001.webp`；支持相对路径或支持 CORS 的 URL，加载后裁切铺入卡面中部展示框） |
 | `stats` | 否 | 互动数据快照对象：`{ "sample": "5.0 / 5 · n=11", "downloads": 32, "comments": 0 }`（不包含浏览数；缺省时卡面回退默认值） |
 
 > 所有文本字段按**纯文本**渲染，不支持 Markdown 或 HTML；双引号按 JSON 规则转义为 `\"`，换行写为 `\n`。页面渲染会自动转义 HTML 特殊字符，TXT 导出保留纯文本原文。

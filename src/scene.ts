@@ -38,8 +38,19 @@ import {
   ArchiveSlotUnderlights,
   MAX_OVERVIEW_SLOT_LIGHTS,
 } from "./archive-slot-underlight";
-import { fileLocation, records, type ArchiveCardStats } from "./data";
-import { modelProvider, type ModelProvider } from "./model-provider";
+import {
+  archiveColumns,
+  fileLocation,
+  getArchiveDataVersion,
+  records,
+  resolveRecordCover,
+  type ArchiveCardStats,
+} from "./data";
+import {
+  modelProvider,
+  modelProviderAssetPath,
+  type ModelProvider,
+} from "./model-provider";
 import { drawCode39Barcode } from "./code39";
 import {
   cellKey,
@@ -93,6 +104,10 @@ const LABEL_SCALE = 2;
 const OVERVIEW_BADGE_WIDTH = 2048;
 const OVERVIEW_BADGE_HEIGHT = 1485;
 const OVERVIEW_BADGE_SCALE = 1;
+const OVERVIEW_HEADER_HEIGHT = 386;
+const OVERVIEW_HEADER_FRACTION = OVERVIEW_HEADER_HEIGHT / OVERVIEW_BADGE_HEIGHT;
+const MAX_OVERVIEW_HEADER_CACHE = 12;
+const OVERVIEW_BADGE_SETTLE_SECONDS = 0.18;
 const HOVER_BADGE_HEIGHT = 192;
 const BURN_STAMP_RIGHT = OVERVIEW_BADGE_WIDTH - 90;
 const BURN_STAMP_WIDTH = 525;
@@ -520,6 +535,7 @@ export class ArchiveScene {
     );
     this.slotUnderlights.setIntroGain(0);
     this.intro = { elapsed: 0, fullLiftUnlocked: false, started: false };
+    this.pendingOverviewBadgeRefresh = false;
     this.cameraInitialized = false;
     this.idleGain = 0;
     this.lastInteraction = this.clock;
@@ -540,9 +556,11 @@ export class ArchiveScene {
     if (snapBar || barHidden) {
       this.slotUnderlights.select(this.selectedCell, true);
     }
-    if (!skipBadgeRefresh && this.pendingOverviewBadgeRefresh) {
+    if (this.pendingOverviewBadgeRefresh) {
       this.pendingOverviewBadgeRefresh = false;
-      this.drawOverviewBadge(this.selectedIndex);
+      if (!skipBadgeRefresh) {
+        this.drawFullOverviewBadge(this.selectedIndex);
+      }
     }
     this.renderState.invalidate();
   }
@@ -623,7 +641,7 @@ export class ArchiveScene {
       this.scene.add(warmOutgoing);
       this.outgoing.push({
         group: warmOutgoing,
-        slot: fileAtCell(warmCell),
+        slot: fileLocation(fileAtCell(warmCell, this.coordinateOrigin.row)).slot,
         cell: warmCell,
         lift: { value: OVERVIEW_LIFT * 0.5, velocity: 0 },
         returnY: null,
@@ -692,11 +710,19 @@ export class ArchiveScene {
     disposeThreeTree(this.scene);
     this.overviewBadgeTexture?.dispose();
     this.overviewBadgeTexture = undefined;
+    for (const entry of this.overviewHeaderCache.values()) {
+      entry.texture.dispose();
+    }
+    this.overviewHeaderCache.clear();
     this.overviewBadgeUniform.value = undefined;
     this.hoverBadgeUniform.value?.dispose();
     this.hoverBadgeUniform.value = undefined;
     for (const image of this.modelProviderImages.values()) image.onload = null;
     this.modelProviderImages.clear();
+    this.cardPhotos.clear();
+    this.cardPhotoSrc.clear();
+    this.cardPhotoTokens.clear();
+    this.cardStatsOverrides.clear();
     this.cardTexture?.dispose();
     this.cardTexture = undefined;
     this.cardCanvas = undefined;
@@ -1032,6 +1058,7 @@ export class ArchiveScene {
         badge,
         hoverBadge,
         badge === this.overviewBadgeUniform ? this.overviewBadgeHeadingEdge : undefined,
+        badge === this.overviewBadgeUniform ? this.overviewBadgeHeightFraction : undefined,
       );
     };
     material.customProgramCacheKey = () =>
@@ -1358,6 +1385,21 @@ export class ArchiveScene {
     value: undefined as THREE.Texture | undefined,
   };
   private readonly overviewBadgeHeadingEdge = { value: 1 };
+  private readonly overviewBadgeHeightFraction = { value: 1 };
+  private overviewBadgeFullHeadingEdge = 1;
+  private overviewBadgeFullIndex = -1;
+  private overviewBadgeFullDirty = true;
+  private overviewBadgeFullAfter = 0;
+  private overviewBadgeDirty = false;
+  private overviewHeaderCache = new Map<
+    number,
+    {
+      canvas: HTMLCanvasElement;
+      texture: THREE.CanvasTexture;
+      headingEdge: number;
+      providerLoaded: boolean;
+    }
+  >();
   private pendingOverviewBadgeRefresh = false;
   private readonly hoverBadgeCanvas = document.createElement("canvas");
   private readonly hoverBadgeUniform = { value: undefined as THREE.CanvasTexture | undefined };
@@ -1370,6 +1412,7 @@ export class ArchiveScene {
   private cardPhotos = new Map<number, HTMLImageElement | null>();
   private cardPhotoSrc = new Map<number, string>();
   private cardPhotoTokens = new Map<number, number>();
+  private cardPhotoSeq = 0;
   private cardStatsOverrides = new Map<number, ArchiveCardStats>();
   /** 详情记录卡面按需创建。总览共享 GLB 的烘焙贴图，不参与切档重绘。 */
   private cardCanvas?: HTMLCanvasElement;
@@ -1833,7 +1876,7 @@ export class ArchiveScene {
       // 总览与离场副本共享 GLB 的烘焙卡面。记录卡面只在打开详情时创建，
       // 避免每次行切换同步分配、重绘并上传 2000 × 1480 画布。
       this.drawLabel(0);
-      this.drawOverviewBadge(0);
+      this.drawFullOverviewBadge(0);
     } else {
       // 旧模型：单独一块铭牌平面，贴在盖板前面。
       const label = new THREE.Mesh(
@@ -1848,18 +1891,20 @@ export class ArchiveScene {
       label.position.set(-1.36, 3.04, 0.255);
       this.model.add(label);
       this.drawLabel(0);
-      this.drawOverviewBadge(0);
+      this.drawFullOverviewBadge(0);
     }
     this.model.updateMatrixWorld(true);
     this.modelBounds.setFromObject(this.model);
     this.scene.add(this.model);
-    this.model.position.copy(this.cellPosition(poolCell(this.selectedSlot)));
+    this.model.position.copy(this.cellPosition(this.selectedCell));
     await this.prewarmOutgoingPrograms();
     this.loaded = true;
   }
 
   private detailCardTexture(index: number) {
-    const isBaked = records[index]?.id === "X-001";
+    const isBaked =
+      records[index]?.id === "X-001" &&
+      getArchiveDataVersion() === 0;
     if (isBaked || this.detailSurfaceIndex !== index) return this.bakedCardTexture;
     return this.cardTexture ?? this.bakedCardTexture;
   }
@@ -1912,7 +1957,13 @@ export class ArchiveScene {
         return;
       }
       try {
-        if (records[target]?.id !== "X-001" && !this.drawCardFace(target)) {
+        if (
+          !(
+            records[target]?.id === "X-001" &&
+            getArchiveDataVersion() === 0
+          ) &&
+          !this.drawCardFace(target)
+        ) {
           throw new Error("detail card canvas is unavailable");
         }
         this.detailSurfaceIndex = target;
@@ -2314,7 +2365,11 @@ export class ArchiveScene {
         this.fixedDetailCameraHeld = false;
       }
     }
-    if (mode === "detail") this.finishIntro(true);
+    if (mode === "detail") {
+      this.finishIntro(true);
+      this.ensureFullOverviewBadge(this.selectedIndex);
+      this.overviewBadgeDirty = false;
+    }
     if (mode !== "archive") this.pendingPulse = null;
     this.lastInteraction = this.clock;
     this.targetReveal = 1;
@@ -2396,15 +2451,14 @@ export class ArchiveScene {
   private rebaseCoordinates() {
     // Periodically reduce the logical coordinates while preserving every
     // relative position, spring velocity, ripple and idle phase.
+    const lanePeriod = Math.max(1, archiveColumns.length);
     const shift = {
       lane:
         Math.abs(this.selectedCell.lane) > 2048
-          ? Math.round((this.selectedCell.lane - 2) / 5) * 5
+          ? Math.round((this.selectedCell.lane - 2) / lanePeriod) * lanePeriod
           : 0,
-      row:
-        Math.abs(this.selectedCell.row) > 2048
-          ? Math.floor((this.selectedCell.row - 12) / 8) * 8
-          : 0,
+      // Lookups retain the row origin modulo each column's own period.
+      row: Math.abs(this.selectedCell.row) > 2048 ? this.selectedCell.row - 12 : 0,
     };
     if (!shift.lane && !shift.row) return;
     this.setHover(null);
@@ -2443,18 +2497,22 @@ export class ArchiveScene {
     if (!this.navigatingDrag) this.cancelPointer();
     this.setHover(null);
     this.lastInteraction = this.clock;
+    const indexChanged = index !== this.selectedIndex;
     this.selectedIndex = index;
     if (this.targetDetail <= 0) {
       this.cancelDetailSurfacePreparation();
     }
     const next = fileLocation(index).slot;
     const previousCell = this.selectedCell;
-    const cell = selectionCell(index, previousCell, navigation);
+    const cell = selectionCell(index, previousCell, navigation, this.coordinateOrigin.row);
     const changed = !sameCell(cell, previousCell);
     if (changed && this.intro) this.finishIntro(false, true);
     const sameColumnRowSwitch =
       changed && cell.lane === previousCell.lane;
-    if (changed && this.loaded && this.lift.value > 0.0001) {
+    if (
+      changed && this.loaded &&
+      (Math.abs(this.lift.value) >= OUTGOING_FINISH_LIFT || this.rotation !== 0)
+    ) {
       const group = this.acquireOutgoingGroup();
       this.appearance.apply(
         group,
@@ -2473,13 +2531,12 @@ export class ArchiveScene {
         lift: { ...this.lift },
         returnY: group.rotation.y !== 0 ? group.position.y : null,
       });
-      this.lift.value = 0;
-      this.lift.velocity = 0;
     }
     this.selectedSlot = next;
     this.selectedCell = cell;
     this.slotUnderlights.select(cell, !this.motion.selectionTransition);
     if (changed) {
+      this.lift = { value: 0, velocity: 0 };
       this.rotation = 0;
       this.returnY = null;
       if (this.fixedDetailCameraHeld) {
@@ -2507,7 +2564,117 @@ export class ArchiveScene {
     // The overview keeps the shared baked print. The 2K record print is
     // generated only once the details are opened.
     if (!this.bakedCardTexture) this.drawLabel(index);
-    this.drawOverviewBadge(index);
+    if (index !== this.overviewBadgeFullIndex) {
+      this.overviewBadgeFullDirty = true;
+    }
+    if (indexChanged) this.overviewBadgeFullAfter = this.clock + OVERVIEW_BADGE_SETTLE_SECONDS;
+    if (this.targetDetail > 0 || this.detail > 0.001) {
+      this.ensureFullOverviewBadge(index);
+      this.overviewBadgeDirty = false;
+    } else {
+      this.overviewBadgeDirty = true;
+    }
+  }
+  public reloadData(nextIndex = 0) {
+    if (!records.length) return;
+    const target = Math.max(
+      0,
+      Math.min(records.length - 1, Math.trunc(nextIndex)),
+    );
+    if (!this.navigatingDrag) this.cancelPointer();
+    this.setHover(null);
+    this.hoverLifts.clear();
+    this.finishIntro(true, true);
+    this.introRelease = null;
+    this.archiveMomentum = null;
+    for (const { group } of this.outgoing) {
+      this.releaseOutgoingGroup(group);
+    }
+    this.outgoing.length = 0;
+    this.pulses = [];
+    this.frozenPulses = [];
+    this.pendingPulse = null;
+    this.cardPhotos.clear();
+    this.cardPhotoSrc.clear();
+    this.cardPhotoTokens.clear();
+    this.cardStatsOverrides.clear();
+    this.overviewBadgeUniform.value = this.overviewBadgeTexture;
+    this.overviewBadgeHeightFraction.value = 1;
+    for (const entry of this.overviewHeaderCache.values()) {
+      entry.texture.dispose();
+    }
+    this.overviewHeaderCache.clear();
+    this.overviewBadgeFullIndex = -1;
+    this.overviewBadgeFullDirty = true;
+    this.overviewBadgeFullAfter = 0;
+    this.overviewBadgeDirty = false;
+    this.pendingOverviewBadgeRefresh = false;
+    this.hoverBadgeIndex = -1;
+    this.detailSurfaceIndex = -1;
+    this.cancelDetailSurfacePreparation();
+
+    const loc = fileLocation(target);
+    this.selectedIndex = target;
+    this.selectedSlot = loc.slot;
+    this.selectedCell = { lane: loc.lane, row: loc.row };
+    this.coordinateOrigin = { lane: 0, row: 0 };
+    this.rotation = 0;
+    this.targetRotation = 0;
+    this.returnY = null;
+
+    if (this.loaded) {
+      const chosen = this.cellPosition(this.selectedCell);
+      this.columnCamera = { value: chosen.x, velocity: 0 };
+      this.rail = { value: SELECTED_ROW_ANCHOR_Z - chosen.z, velocity: 0 };
+      this.shoulder = { value: this.selectedCell.row, velocity: 0 };
+      this.laneFocus = { value: this.selectedCell.lane, velocity: 0 };
+      this.slotUnderlights.select(this.selectedCell, true);
+      if (this.fixedDetailCameraHeld) {
+        this.fixedDetailLiftTarget = INSPECTION_LIFT;
+        this.fixedDetailTargetPose = undefined;
+        this.fixedDetailCameraBasis = undefined;
+      }
+      this.ensureFullOverviewBadge(target);
+    }
+    this.renderState.invalidate();
+  }
+  public refreshRecord(
+    index: number,
+    options: { coverChanged?: boolean; statsChanged?: boolean } = {},
+  ) {
+    if (index < 0 || index >= records.length) return;
+    const cachedHeader = this.overviewHeaderCache.get(index);
+    if (cachedHeader) {
+      if (this.overviewBadgeUniform.value === cachedHeader.texture) {
+        this.overviewBadgeUniform.value = this.overviewBadgeTexture;
+        this.overviewBadgeHeightFraction.value = 1;
+      }
+      cachedHeader.texture.dispose();
+      this.overviewHeaderCache.delete(index);
+    }
+    if (options.coverChanged) {
+      this.cardPhotoTokens.set(index, ++this.cardPhotoSeq);
+      this.cardPhotoSrc.delete(index);
+      this.cardPhotos.delete(index);
+    }
+    if (options.statsChanged) {
+      this.cardStatsOverrides.delete(index);
+    }
+    if (this.hoverBadgeIndex === index) {
+      this.hoverBadgeIndex = -1;
+    }
+    if (index === this.overviewBadgeFullIndex) {
+      this.overviewBadgeFullDirty = true;
+    }
+    if (index === this.detailSurfaceIndex) {
+      this.detailSurfaceIndex = -1;
+    }
+    if (index === this.selectedIndex && this.loaded) {
+      this.overviewBadgeDirty = true;
+      if (this.intro) this.pendingOverviewBadgeRefresh = true;
+      else this.flushOverviewBadge();
+    }
+    this.renderState.invalidate();
   }
   private emitPulse(cell: ArchiveCell) {
     this.pulses.push({ ...cell, time: this.pulseClock });
@@ -2879,12 +3046,18 @@ export class ArchiveScene {
     c.restore();
     this.labelTexture.needsUpdate = true;
   }
-  private refreshSelectedBadge(index: number) {
+  private refreshSelectedBadge(index: number, forceFull = false) {
+    if (index === this.overviewBadgeFullIndex) {
+      this.overviewBadgeFullDirty = true;
+    }
     if (index !== this.selectedIndex) return;
     if (this.intro) {
       this.pendingOverviewBadgeRefresh = true;
-    } else {
-      this.drawOverviewBadge(index);
+      return;
+    }
+    if (forceFull || this.targetDetail > 0 || this.detail > 0.001) {
+      this.drawFullOverviewBadge(index);
+      this.overviewBadgeDirty = false;
       this.renderState.invalidate();
     }
   }
@@ -2894,12 +3067,12 @@ export class ArchiveScene {
     refreshBadge = true,
   ) {
     const target = Math.max(0, Math.min(records.length - 1, Math.floor(index)));
-    const token = (this.cardPhotoTokens.get(target) ?? 0) + 1;
+    const token = ++this.cardPhotoSeq;
     this.cardPhotoTokens.set(target, token);
     if (!src) {
       this.cardPhotoSrc.delete(target);
       this.cardPhotos.delete(target);
-      if (refreshBadge) this.refreshSelectedBadge(target);
+      if (refreshBadge) this.refreshSelectedBadge(target, true);
       return;
     }
     const resolved =
@@ -2919,11 +3092,16 @@ export class ArchiveScene {
             return;
           }
           this.cardPhotos.set(target, img);
-          this.refreshSelectedBadge(target);
+          this.refreshSelectedBadge(target, refreshBadge);
         });
     };
+    img.onerror = () => {
+      if (!this.disposed && this.cardPhotoTokens.get(target) === token) {
+        this.cardPhotoSrc.delete(target);
+      }
+    };
     img.src = resolved;
-    if (refreshBadge) this.refreshSelectedBadge(target);
+    if (refreshBadge) this.refreshSelectedBadge(target, true);
   }
   public setCardPhoto(src: string | null, index = this.selectedIndex) {
     this.loadCardPhoto(src, index, true);
@@ -2942,7 +3120,7 @@ export class ArchiveScene {
         ...stats,
       });
     }
-    this.refreshSelectedBadge(target);
+    this.refreshSelectedBadge(target, true);
   }
 
   private drawMetricIcon(
@@ -3073,15 +3251,30 @@ export class ArchiveScene {
     const image = new Image();
     this.modelProviderImages.set(provider, image);
     image.onload = () => {
-      if (
-        this.disposed ||
-        modelProvider(records[this.selectedIndex]?.en ?? "") !== provider
-      ) {
+      if (this.disposed) return;
+      for (const [idx, entry] of this.overviewHeaderCache) {
+        if (modelProvider(records[idx]?.en ?? "") === provider) {
+          entry.providerLoaded = false;
+        }
+      }
+      if (modelProvider(records[this.selectedIndex]?.en ?? "") !== provider) {
         return;
       }
-      this.refreshSelectedBadge(this.selectedIndex);
+      if (this.selectedIndex === this.overviewBadgeFullIndex) {
+        this.overviewBadgeFullDirty = true;
+      }
+      if (this.intro) {
+        this.pendingOverviewBadgeRefresh = true;
+      } else if (this.targetDetail > 0 || this.detail > 0.001) {
+        this.drawFullOverviewBadge(this.selectedIndex);
+        this.overviewBadgeDirty = false;
+        this.renderState.invalidate();
+      } else {
+        this.overviewBadgeDirty = true;
+        this.renderState.invalidate();
+      }
     };
-    image.src = publicAsset(`assets/model-providers/${provider}.svg`);
+    image.src = publicAsset(modelProviderAssetPath(provider));
   }
 
   private drawOverviewHeading(
@@ -3170,12 +3363,107 @@ export class ArchiveScene {
     this.hoverBadgeIndex = index;
   }
 
-  private drawOverviewBadge(index: number) {
+  private bindOverviewHeaderBadge(index: number) {
+    if (!this.overviewBadgeTexture) return;
+    const record = records[index];
+    const cover = resolveRecordCover(record, index);
+    if (cover && !this.cardPhotoSrc.has(index)) {
+      this.loadCardPhoto(cover, index, false);
+    }
+    const provider = modelProvider(record?.en ?? "");
+    const providerReady = !provider || Boolean(this.getModelProviderLogo(record?.en ?? ""));
+    let entry = this.overviewHeaderCache.get(index);
+    if (entry && (!provider || entry.providerLoaded || !providerReady)) {
+      this.overviewHeaderCache.delete(index);
+      this.overviewHeaderCache.set(index, entry);
+      this.overviewBadgeUniform.value = entry.texture;
+      this.overviewBadgeHeightFraction.value = OVERVIEW_HEADER_FRACTION;
+      this.overviewBadgeHeadingEdge.value = entry.headingEdge;
+      return;
+    }
+    if (!entry) {
+      if (this.overviewHeaderCache.size >= MAX_OVERVIEW_HEADER_CACHE) {
+        const oldestKey = this.overviewHeaderCache.keys().next().value;
+        if (oldestKey !== undefined) {
+          const oldest = this.overviewHeaderCache.get(oldestKey);
+          this.overviewHeaderCache.delete(oldestKey);
+          if (oldest) entry = oldest;
+        }
+      }
+      if (!entry) {
+        const canvas = document.createElement("canvas");
+        canvas.width = OVERVIEW_BADGE_WIDTH * OVERVIEW_BADGE_SCALE;
+        canvas.height = OVERVIEW_HEADER_HEIGHT * OVERVIEW_BADGE_SCALE;
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = this.overviewBadgeTexture.anisotropy;
+        entry = {
+          canvas,
+          texture,
+          headingEdge: 1,
+          providerLoaded: false,
+        };
+      }
+    } else {
+      this.overviewHeaderCache.delete(index);
+    }
+    const c = entry.canvas.getContext("2d");
+    if (!c) return;
+    c.save();
+    c.setTransform(OVERVIEW_BADGE_SCALE, 0, 0, OVERVIEW_BADGE_SCALE, 0, 0);
+    c.clearRect(0, 0, OVERVIEW_BADGE_WIDTH, OVERVIEW_HEADER_HEIGHT);
+    const headingBottom = this.drawOverviewHeading(c, index, true);
+    this.drawBurnStamp(c, index);
+    c.restore();
+    const headingEdge = Math.min(
+      OVERVIEW_HEADER_HEIGHT - 2,
+      Math.max(headingBottom + 20, BURN_STAMP_TOP + BURN_STAMP_HEIGHT + 20),
+    );
+    entry.headingEdge = 1 - headingEdge / OVERVIEW_BADGE_HEIGHT;
+    entry.providerLoaded = providerReady;
+    entry.texture.needsUpdate = true;
+    this.overviewHeaderCache.set(index, entry);
+    this.overviewBadgeUniform.value = entry.texture;
+    this.overviewBadgeHeightFraction.value = OVERVIEW_HEADER_FRACTION;
+    this.overviewBadgeHeadingEdge.value = entry.headingEdge;
+  }
+
+  private ensureFullOverviewBadge(index: number) {
+    if (
+      this.overviewBadgeFullIndex === index &&
+      !this.overviewBadgeFullDirty &&
+      this.overviewBadgeTexture
+    ) {
+      this.overviewBadgeUniform.value = this.overviewBadgeTexture;
+      this.overviewBadgeHeightFraction.value = 1;
+      this.overviewBadgeHeadingEdge.value = this.overviewBadgeFullHeadingEdge;
+      return;
+    }
+    this.drawFullOverviewBadge(index);
+  }
+
+  private flushOverviewBadge() {
+    if (this.intro || !this.overviewBadgeTexture) return;
+    // Keep the cached header during a burst and show the full card once it settles.
+    if (this.targetDetail > 0 || this.detail > 0.001 || this.clock >= this.overviewBadgeFullAfter) {
+      if (!this.overviewBadgeDirty && !this.overviewBadgeFullDirty &&
+        this.overviewBadgeFullIndex === this.selectedIndex &&
+        this.overviewBadgeUniform.value === this.overviewBadgeTexture) return;
+      this.overviewBadgeDirty = false;
+      this.ensureFullOverviewBadge(this.selectedIndex);
+    } else if (this.overviewBadgeDirty) {
+      this.overviewBadgeDirty = false;
+      this.bindOverviewHeaderBadge(this.selectedIndex);
+    }
+  }
+
+  private drawFullOverviewBadge(index: number) {
     if (!this.overviewBadgeTexture) return;
     if (index === this.selectedIndex) this.pendingOverviewBadgeRefresh = false;
     const record = records[index];
-    if (record?.cover && !this.cardPhotoSrc.has(index)) {
-      this.loadCardPhoto(record.cover, index, false);
+    const cover = resolveRecordCover(record, index);
+    if (cover && !this.cardPhotoSrc.has(index)) {
+      this.loadCardPhoto(cover, index, false);
     }
     const c = this.overviewBadgeCanvas.getContext("2d");
     if (!c) return;
@@ -3193,7 +3481,9 @@ export class ArchiveScene {
       py - 2,
       Math.max(headingBottom + 20, BURN_STAMP_TOP + BURN_STAMP_HEIGHT + 20),
     );
-    this.overviewBadgeHeadingEdge.value = 1 - headingEdge / OVERVIEW_BADGE_HEIGHT;
+    const headingEdgeNormalized = 1 - headingEdge / OVERVIEW_BADGE_HEIGHT;
+    this.overviewBadgeFullHeadingEdge = headingEdgeNormalized;
+    this.overviewBadgeHeadingEdge.value = headingEdgeNormalized;
     const photo = this.cardPhotos.get(index);
     const hasPhoto = Boolean(photo?.naturalWidth && photo.naturalHeight);
     c.save();
@@ -3267,6 +3557,10 @@ export class ArchiveScene {
     c.restore();
 
     c.restore();
+    this.overviewBadgeFullIndex = index;
+    this.overviewBadgeFullDirty = false;
+    this.overviewBadgeUniform.value = this.overviewBadgeTexture;
+    this.overviewBadgeHeightFraction.value = 1;
     this.overviewBadgeTexture.needsUpdate = true;
   }
   private ensureInstanceCapacity(required: number) {
@@ -3381,7 +3675,7 @@ export class ArchiveScene {
     // pointer is moving over the array.
     this.lastInteraction = this.clock;
     this.hoverCell = cell ? { ...cell } : null;
-    this.onHover?.(cell ? fileAtCell(cell) : null);
+    this.onHover?.(cell ? fileAtCell(cell, this.coordinateOrigin.row) : null);
   }
   private pickCell(x: number, y: number) {
     const r = this.renderer.domElement.getBoundingClientRect();
@@ -3453,7 +3747,7 @@ export class ArchiveScene {
           lane: Math.round(from.lane + (goal.lane - from.lane) * i / steps),
           row: Math.round(from.row + (goal.row - from.row) * i / steps),
         };
-        if (!sameCell(cell, this.selectedCell)) this.onSelect?.(fileAtCell(cell), cell);
+        if (!sameCell(cell, this.selectedCell)) this.onSelect?.(fileAtCell(cell, this.coordinateOrigin.row), cell);
       }
     } finally {
       this.navigatingDrag = false;
@@ -3572,7 +3866,6 @@ export class ArchiveScene {
       this.dragging = !browse && this.canInspect;
       startTrack = { lane: this.columnCamera.value, row: this.rail.value };
       this.archiveDrag.start(e.clientX, e.clientY, this.dragProjection(), e.timeStamp);
-      this.setHover(null);
       canvas.setPointerCapture(e.pointerId);
     }, { signal: this.inputEvents.signal });
     canvas.addEventListener("pointermove", (e) => {
@@ -3623,7 +3916,7 @@ export class ArchiveScene {
             // selected and started lifting it, so the lift is released here and
             // the extraction takes over from the current height: no second rise.
             const now = e.timeStamp || performance.now();
-            const file = fileAtCell(cell);
+            const file = fileAtCell(cell, this.coordinateOrigin.row);
             const repeat =
               this.lastPress.file === file &&
               now - this.lastPress.time < DOUBLE_PRESS_MS;
@@ -3692,7 +3985,7 @@ export class ArchiveScene {
         this.finishIntro();
         this.navigatingDrag = true;
         try {
-          for (let i = 0; i < steps; i++) this.onNavigate?.("row", direction);
+          this.onNavigate?.("row", direction * steps);
         } finally {
           this.navigatingDrag = false;
         }
@@ -3720,6 +4013,7 @@ export class ArchiveScene {
     // compile or upload frame therefore delays the crest instead of skipping it.
     this.pulseClock += dt;
     this.flushHover();
+    this.flushOverviewBadge();
     this.slotUnderlights.update(dt, !this.motion.selectionTransition);
     if (this.introRelease) {
       this.introRelease.age += dt;
@@ -4439,7 +4733,7 @@ export class ArchiveScene {
       this.drawnCells.push(cell);
       if (this.hoverCell && sameCell(cell, this.hoverCell)) {
         this.hoverBadgeInstance.value = i;
-        this.drawHoverBadge(fileAtCell(cell));
+        this.drawHoverBadge(fileAtCell(cell, this.coordinateOrigin.row));
       }
       this.slotLightUpdates?.scalar(
         i,
@@ -4589,9 +4883,14 @@ export class ArchiveScene {
     } else {
       state.begin();
       state.add(
-        this.overviewBadgeTexture?.version ?? 0,
+        this.overviewBadgeUniform.value?.uuid ?? "",
+        this.overviewBadgeUniform.value?.version ?? 0,
         this.hoverBadgeInstance.value,
         this.hoverBadgeUniform.value?.version ?? 0,
+      );
+      state.floats(
+        this.overviewBadgeHeightFraction.value,
+        this.overviewBadgeHeadingEdge.value,
       );
       state.floats(...this.camera.projectionMatrix.elements, ...this.camera.matrixWorldInverse.elements,
         ...this.camera.position.toArray(),
@@ -4717,7 +5016,7 @@ export class ArchiveScene {
       pulses: this.pulses.map((pulse) => ({ ...pulse })),
       frozenPulses: this.frozenPulses.map((pulse) => ({ ...pulse })),
       selectedSlot: this.selectedSlot,
-      selectedLane: Math.floor(this.selectedSlot / 32),
+      selectedLane: fileLocation(this.selectedIndex).lane,
       selectedCell: { ...this.selectedCell },
       hoverCell: this.hoverCell ? { ...this.hoverCell } : null,
       hoverLifts: Object.fromEntries(this.hoverLifts),

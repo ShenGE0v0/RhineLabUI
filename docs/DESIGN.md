@@ -10,7 +10,7 @@
 
 | 维度 | 网页端（纯净画布 `.web-archive-clean`） |
 | --- | --- |
-| 2D HUD 与侧边栏 | 默认隐藏 `.brand`、`.system-nav`、`#archive-ui`、`#detail-ui`、`.powered`、`.system-footer`、`#inspection-marks` 及归档态更新提示 |
+| 2D HUD 与侧边栏 | 默认隐藏 `.brand`、`.system-nav`、`#archive-ui`、`#detail-ui`、`.powered`、`.system-footer`、`#inspection-marks` 及归档态更新提示，仅在右上角保留非交互的 `.clean-archive-title`（总览下随鼠标悬停卡片实时切换对应模型厂商 SVG 图标（匹配时显示）与作品标题，并以从左到右波浪散点细方格同步交叉溶解过渡；未悬停或详情态下回退显示当前选中档案的厂商图标与标题） |
 | 详情推进方式 | 启用 `fixedDetailCamera`，恒定 `6.556°` 长焦球面双弹簧推进，背景维持总览阵列表现 |
 | 快捷键 | 方向键、滚轮、拖拽、`Enter`/双击打开详情、`Esc` 返回、`/` 检索、手柄 `Home` 收藏弹窗 |
 

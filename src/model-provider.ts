@@ -40,6 +40,10 @@ const modelProviders = [
 
 export type ModelProvider = (typeof modelProviders)[number][0];
 
+export function modelProviderAssetPath(provider: ModelProvider) {
+  return `assets/model-providers/${provider}.svg`;
+}
+
 export function modelProvider(model: string): ModelProvider | undefined {
   const segments = model.trim().toLowerCase().split("/");
   // A family name takes precedence over a hosting or routing namespace.

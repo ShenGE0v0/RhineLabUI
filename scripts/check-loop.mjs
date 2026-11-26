@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { columnFiles, fileLocation } from "../src/data.ts";
+import { columnFiles, fileLocation, setArchiveDataset } from "../src/data.ts";
 import {
   fileAtCell,
   selectionCell,
@@ -70,6 +70,27 @@ for (let i = 0; i < 160; i++) {
     { lane: Math.floor(i / 32), row: i % 32 },
     "Reference-animation instance order is preserved",
   );
+}
+
+setArchiveDataset(["A", "B"].flatMap((category, lane) =>
+  Array.from({ length: lane === 0 ? 47 : 53 }, (_, index) => ({
+    id: `${category}${index + 1}`, title: `${category}${index + 1}`, category,
+  })),
+));
+for (const rowOrigin of [2037, -2061]) {
+  for (const lane of [-3, 0, 1, 4]) {
+    const center = { lane, row: 12 };
+    const shifted = (cell) => ({ ...cell, row: cell.row + rowOrigin });
+    assert.equal(fileAtCell(center, rowOrigin), fileAtCell(shifted(center)));
+    for (const row of [10, 11, 12, 13, 14]) {
+      const adjacent = { lane, row };
+      const target = fileAtCell(shifted(adjacent));
+      assert.deepEqual(selectionCell(target, center, undefined, rowOrigin), adjacent);
+    }
+    const next = { lane, row: 13 };
+    const nextIndex = fileAtCell(shifted(next));
+    assert.equal(fileAtCell(selectionCell(nextIndex, center, { axis: "row", direction: 1 }, rowOrigin), rowOrigin), nextIndex);
+  }
 }
 console.log(
   JSON.stringify(

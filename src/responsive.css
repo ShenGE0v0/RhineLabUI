@@ -34,6 +34,7 @@
 }
 :is([data-layout="compact"], [data-layout="portrait"]) .brand { left: var(--edge); top: var(--top-edge); transform: scale(.48) !important; transform-origin: top left; }
 :is([data-layout="compact"], [data-layout="portrait"]) .system-nav { top: var(--top-edge); right: var(--edge); gap: 18px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .clean-archive-title { top: var(--top-edge); right: var(--edge); font-size: 18px; }
 :is([data-layout="compact"], [data-layout="portrait"]) .system-nav button { min-height: 44px; min-width: 44px; font-size: 11px; justify-content: center; gap: 7px; }
 :is([data-layout="compact"], [data-layout="portrait"]) :is(.key, .powered, .archive-hint, .hover-label) { display: none; }
 :is([data-layout="compact"], [data-layout="portrait"]) .system-footer { left: var(--edge); right: var(--edge); bottom: var(--bottom-edge); font-size: 8px; gap: 12px; }
@@ -89,6 +90,7 @@
 
 /* Portrait keeps the specimen above an independently scrollable document. */
 [data-layout="portrait"] .brand { transform: scale(.42) !important; }
+[data-layout="portrait"] .clean-archive-title { font-size: clamp(11px, 3.85vw, 15px); }
 [data-layout="portrait"] .system-nav { gap: 8px; }
 [data-layout="portrait"] .system-nav button[data-action="search"] { font-size: 0; gap: 0; }
 [data-layout="portrait"] .system-nav button[data-action="saved"] { font-size: 10px; }
