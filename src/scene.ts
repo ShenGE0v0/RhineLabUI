@@ -3,7 +3,7 @@ import { ArchiveVisibility } from "./archive-visibility";
 import { ArchiveDrawCoverage, ArchiveShadowCoverage } from "./archive-draw-coverage";
 import { InstanceUpdates } from "./instance-updates";
 import { RenderState } from "./render-state";
-import { SharedDepthAO, SharedDepthBokeh } from "./shared-depth";
+import { SharedDepthBokeh } from "./shared-depth";
 import { disposeThreeTree } from "./three-resources";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { createArchiveLighting, type LightingLook } from "./archive-lighting";
@@ -29,7 +29,6 @@ import { CardAppearance } from "./appearance";
 import { configureInternalOptics } from "./internal-optics";
 import {
   ARRAY_ROLES,
-  CARD_ROLE,
   REVEAL_ROLE,
   surfaceName,
   surfaceRole,
@@ -42,7 +41,6 @@ import {
 import {
   archiveColumns,
   fileLocation,
-  getArchiveDataVersion,
   records,
   resolveRecordCover,
   type ArchiveCardStats,
@@ -136,11 +134,6 @@ const BURN_STAMP_GAP = 80;
 const BURN_STAMP_TOP = 156;
 const BURN_STAMP_HEIGHT = 96;
 
-/** 卡面版式（对应设计稿 card-A.png 的 2000 × 1480）。
- *  新模型把整张卡面印在贴纸上，运行时按档案重绘，所以这里的坐标就是设计稿坐标。 */
-const CARD_WIDTH = 2000;
-const CARD_HEIGHT = 1480;
-
 /** The reference is a single warm ivory family; structure is separated by
  *  value and soft shadow instead of a contrasting mint outline. */
 const WARM = {
@@ -172,9 +165,6 @@ const WARM = {
 const OVERVIEW_MIST = new THREE.Color("#f3eee8");
 const LIGHT_OVERVIEW_KEY_POSITION = new THREE.Vector3(-23, 21, 5);
 const LIGHT_OVERVIEW_KEY_TARGET = new THREE.Vector3(-2.0, -1.0, -3.5);
-const LIGHT_DETAIL_KEY_POSITION = new THREE.Vector3(-21, 20, 14);
-const LIGHT_DETAIL_KEY_TARGET = new THREE.Vector3(-1.5, 0.8, -2.5);
-const LIGHT_DETAIL_KEY_INTENSITY = 290;
 const LIGHT_OVERVIEW_KEY_COLOR = new THREE.Color("#ffead6");
 const LIGHT_OVERVIEW_FILL_POSITION = new THREE.Vector3(16, 14, 24);
 const LIGHT_OVERVIEW_FILL_COLOR = new THREE.Color("#ffead8");
@@ -189,7 +179,6 @@ const LIGHT_OVERVIEW_HORIZONTAL_SCALE = 0.97;
 const LIGHT_OVERVIEW_VERTICAL_SCALE = 1.02;
 const SELECTED_ROW_ANCHOR_Z = -2.17;
 const LIGHT_OVERVIEW_FOCUS_HEIGHT = 3.45;
-const OVERVIEW_FOCUS_HEIGHT = 2;
 const DETAIL_FRAME_HEIGHT = 0.72;
 const DETAIL_FRAME_ABSOLUTE_MAX_WIDTH = 0.84;
 const DETAIL_FRAME_EDGE_SAFE = 0.08;
@@ -204,7 +193,6 @@ const DETAIL_CAMERA_ORBIT_OPEN_RATE = 4.3;
 const DETAIL_CAMERA_CLOSE_RATE = 4.6;
 const DETAIL_LIFT_OPEN_RATE = 3.8;
 const OVERVIEW_APERTURE = 0.0003;
-const DETAIL_APERTURE = 0.0008;
 const LIGHT_OVERVIEW_APERTURE_DELTA = 0.00006;
 const OVERVIEW_RECT_LIGHT_WIDTH = 36;
 const OVERVIEW_RECT_LIGHT_HEIGHT = 0.29;
@@ -354,35 +342,6 @@ function fitOneLine(
   while (end > 1 && context.measureText(text.slice(0, end) + "…").width > maxWidth)
     end--;
   return end > 1 ? text.slice(0, end).trimEnd() + "…" : "…";
-}
-
-/** Shrink a canvas font until the text fits, then truncate if the floor is
- *  reached. Returns the text and the final size so the caller can draw it. */
-function fitCanvasText(
-  context: CanvasRenderingContext2D,
-  value: string,
-  maxWidth: number,
-  size: number,
-  family: string,
-  weight = "",
-) {
-  let current = size;
-  const set = () => {
-    context.font = `${weight ? weight + " " : ""}${current}px ${family}`;
-  };
-  set();
-  while (current > 10 && context.measureText(value).width > maxWidth) {
-    current -= 2;
-    set();
-  }
-  let text = value;
-  if (context.measureText(text).width > maxWidth) {
-    let end = text.length;
-    while (end > 1 && context.measureText(text.slice(0, end) + "…").width > maxWidth)
-      end--;
-    text = end > 1 ? text.slice(0, end).trimEnd() + "…" : "…";
-  }
-  return { text, size: current };
 }
 
 /** Draw wrapped lines with the last line anchored to the given baseline. */
@@ -662,7 +621,6 @@ export class ArchiveScene {
         this.appearanceInSlot(
           OVERVIEW_LIFT * 0.5,
           this.slotUnderlights.directFor(warmCell),
-          1,
         ),
       );
       this.appearance.setClarity(warmOutgoing, 0);
@@ -726,7 +684,6 @@ export class ArchiveScene {
     this.disposed = true;
     this.inputEvents.abort();
     this.cancelPointer();
-    this.cancelDetailSurfacePreparation();
     for (const prewarm of this.outgoingPrewarm) {
       this.appearance.dispose(prewarm);
       prewarm.clear();
@@ -762,15 +719,10 @@ export class ArchiveScene {
     this.cardPhotoSrc.clear();
     this.cardPhotoTokens.clear();
     this.cardStatsOverrides.clear();
-    this.cardTexture?.dispose();
-    this.cardTexture = undefined;
-    this.cardCanvas = undefined;
     this.appearance.disposeSources();
     this.model.clear();
     this.outgoing = [];
     this.instances = [];
-    this.assemblyTemplate?.then(disposeThreeTree).catch(() => {});
-    this.assemblyTemplate = undefined;
     this.light.shadow.map?.dispose();
     for (const pass of this.composer.passes) pass.dispose();
     this.composer.dispose();
@@ -1265,16 +1217,13 @@ export class ArchiveScene {
     this.renderState.invalidate();
     return value;
   }
-  private appearanceInSlot(lift: number, directLight: number, lightOverview: number) {
+  private appearanceInSlot(lift: number, directLight: number) {
     const illuminated = THREE.MathUtils.smoothstep(
       directLight * this.overviewSlotLightGain.value,
       0,
       1,
     );
-    return (
-      ease(lift / OVERVIEW_LIFT) *
-      THREE.MathUtils.lerp(1, illuminated, lightOverview)
-    );
+    return ease(lift / OVERVIEW_LIFT) * illuminated;
   }
   private syncOverviewSlotLights() {
     const bar = this.slotUnderlights.barPosition;
@@ -1299,13 +1248,10 @@ export class ArchiveScene {
   // All visible foreground geometry is beyond 5; retain the framing and lens.
   readonly camera = new THREE.PerspectiveCamera(34, 16 / 9, 5, 300);
   private composer: EffectComposer;
-  private ao: SharedDepthAO;
   private bokeh: BokehPass;
-  private readonly overviewBottomLight = { value: 0 };
+  private readonly overviewBottomLight = { value: 1 };
   private readonly overviewSelectedSlotProximity = { value: 1 };
   private readonly arrayBottomLight = { value: 1 };
-  private readonly lightKeyPositionScratch = new THREE.Vector3();
-  private readonly lightKeyTargetScratch = new THREE.Vector3();
   private readonly overviewTrackOffset = { value: new THREE.Vector2() };
   private readonly overviewSlotLightGain = { value: 1 };
   private readonly overviewSlotLightsUniform = {
@@ -1392,7 +1338,6 @@ export class ArchiveScene {
   private idleGain = 0;
   private lastInteraction = 0;
   private cameraAim = new THREE.Vector3();
-  private readonly fixedDetailCamera: boolean;
   private fixedDetailCameraHeld = false;
   private detailCameraMove = { value: 0, velocity: 0 };
   private detailCameraAimMove = { value: 0, velocity: 0 };
@@ -1496,20 +1441,9 @@ export class ArchiveScene {
   private cardPhotoTokens = new Map<number, number>();
   private cardPhotoSeq = 0;
   private cardStatsOverrides = new Map<number, ArchiveCardStats>();
-  /** 详情记录卡面按需创建。总览共享 GLB 的烘焙贴图，不参与切档重绘。 */
-  private cardCanvas?: HTMLCanvasElement;
-  private cardTexture?: THREE.CanvasTexture;
-  /** GLB 里烘焙的 REF 卡面，用于 X-001 的参考图原样显示。 */
-  private bakedCardImage?: CanvasImageSource;
+  /** GLB 里烘焙的 REF 卡面贴图（用于无运行时纹理时的兜底引用）。 */
   private bakedCardTexture?: THREE.Texture;
   private selectedIndex = 0;
-  private detailSurfaceIndex = -1;
-  private detailSurfaceTarget = -1;
-  private detailSurfaceRequest = 0;
-  private detailSurfaceFrame: number | null = null;
-  private detailSurfacePromise?: Promise<void>;
-  private detailSurfaceResolve?: () => void;
-  private modelCenterY = 1.85;
   /** 卡面前表面的模型局部 Z；旧模型没有 card 角色时保留旧铭牌平面值。 */
   private cardPlaneZ = 0.255;
   private labelMark = new Image();
@@ -1517,7 +1451,6 @@ export class ArchiveScene {
   private quality = normalizeQuality(undefined);
   private appliedQuality = "";
   private smaa = new SMAAPass();
-  private aoKernelSize = 32;
   onSelect?: (index: number, cell?: ArchiveCell) => void;
   /** A second press on the already selected card within the double-press window. */
   onOpen?: (index: number) => void;
@@ -1530,9 +1463,6 @@ export class ArchiveScene {
     private readonly deferSelectionPulse = false,
     private readonly lightingLook: LightingLook = "baseline",
   ) {
-    this.fixedDetailCamera = Boolean(
-      container.closest(".web-archive-clean"),
-    );
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
@@ -1645,21 +1575,11 @@ export class ArchiveScene {
       Math.max(1, logicalSize.y),
     );
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.ao = new SharedDepthAO(
-      this.scene,
-      this.camera,
-      container.clientWidth,
-      container.clientHeight,
-    );
-    this.ao.kernelRadius = lightingLook === "refined" ? 0.44 : 0.38;
-    this.ao.minDistance = 0.001;
-    this.ao.maxDistance = 0.09;
-    this.composer.addPass(this.ao);
     this.bokeh = new SharedDepthBokeh(this.scene, this.camera, {
       focus: 25,
       aperture: 0.0018,
       maxblur: 0.011,
-    }, () => this.ao);
+    });
     this.composer.addPass(this.bokeh);
     this.smaa.enabled = false;
     this.composer.addPass(this.smaa);
@@ -1685,7 +1605,6 @@ export class ArchiveScene {
     );
     gltf.scene.updateMatrixWorld(true);
     const normalized = normalizeArchiveScene(gltf.scene);
-    this.modelCenterY = normalized.centerY;
     const meshes: THREE.Mesh[] = [];
     gltf.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) meshes.push(o);
@@ -1713,9 +1632,6 @@ export class ArchiveScene {
         geom.computeBoundingBox();
         if (geom.boundingBox)
           cardPlaneZ = Math.max(cardPlaneZ, geom.boundingBox.max.z);
-      }
-      if (role === "card" && !this.bakedCardImage && source.map?.image) {
-        this.bakedCardImage = source.map.image as CanvasImageSource;
       }
       if (role === "card" && !this.bakedCardTexture && source.map) {
         this.bakedCardTexture = source.map;
@@ -2026,174 +1942,6 @@ export class ArchiveScene {
     this.loaded = true;
   }
 
-  private detailCardTexture(index: number) {
-    const isBaked =
-      records[index]?.id === "X-001" &&
-      getArchiveDataVersion() === 0;
-    if (isBaked || this.detailSurfaceIndex !== index) return this.bakedCardTexture;
-    return this.cardTexture ?? this.bakedCardTexture;
-  }
-  private cancelDetailSurfacePreparation() {
-    this.detailSurfaceRequest++;
-    if (this.detailSurfaceFrame !== null) {
-      cancelAnimationFrame(this.detailSurfaceFrame);
-      this.detailSurfaceFrame = null;
-    }
-    this.detailSurfaceTarget = -1;
-    this.detailSurfacePromise = undefined;
-    const resolve = this.detailSurfaceResolve;
-    this.detailSurfaceResolve = undefined;
-    resolve?.();
-  }
-  /**
-   * The 2K record print is only needed for the 360° viewer assembly.
-   * Schedule it off the input frame so the overview keeps sharing the GLB texture.
-   */
-  private prepareDetailSurface(index: number): Promise<void> {
-    const target =
-      ((Math.trunc(index) % records.length) + records.length) % records.length;
-    if (this.detailSurfaceIndex === target) {
-      return Promise.resolve();
-    }
-    if (
-      this.detailSurfacePromise &&
-      this.detailSurfaceTarget === target
-    ) {
-      return this.detailSurfacePromise;
-    }
-    this.cancelDetailSurfacePreparation();
-    const request = this.detailSurfaceRequest;
-    this.detailSurfaceTarget = target;
-    const promise = new Promise<void>((resolve) => {
-      this.detailSurfaceResolve = resolve;
-    });
-    this.detailSurfacePromise = promise;
-    const resolveDetail = () => {
-      this.detailSurfaceTarget = -1;
-      this.detailSurfacePromise = undefined;
-      const resolve = this.detailSurfaceResolve;
-      this.detailSurfaceResolve = undefined;
-      resolve?.();
-    };
-    this.detailSurfaceFrame = requestAnimationFrame(() => {
-      this.detailSurfaceFrame = null;
-      if (request !== this.detailSurfaceRequest) {
-        resolveDetail();
-        return;
-      }
-      try {
-        if (
-          !(
-            records[target]?.id === "X-001" &&
-            getArchiveDataVersion() === 0
-          ) &&
-          !this.drawCardFace(target)
-        ) {
-          throw new Error("detail card canvas is unavailable");
-        }
-        this.detailSurfaceIndex = target;
-      } catch (error) {
-        console.warn("[archive] detail card surface preparation failed", error);
-      }
-      resolveDetail();
-    });
-    return promise;
-  }
-
-  private assemblyTemplate?: Promise<THREE.Group>;
-  async createAssemblyModel() {
-    await this.prepareDetailSurface(this.selectedIndex);
-    this.assemblyTemplate ??= new GLTFLoader()
-      .loadAsync(publicAsset("assets/archive-assembly.glb"))
-      .then((gltf) => {
-        gltf.scene.updateMatrixWorld(true);
-        return gltf.scene;
-      })
-      .catch((error) => {
-        this.assemblyTemplate = undefined;
-        throw error;
-      });
-    const template = await this.assemblyTemplate;
-    const normalized = normalizeArchiveScene(template);
-    const model = new THREE.Group();
-    const meshes: THREE.Mesh[] = [];
-    template.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return;
-      const name = (object.material as THREE.Material).name.replace(
-        /\.\d+$/,
-        "",
-      );
-      const mesh = new THREE.Mesh(
-        object.geometry
-          .clone()
-          .applyMatrix4(object.matrixWorld)
-          .translate(normalized.offset.x, normalized.offset.y, normalized.offset.z),
-        object.material,
-      );
-      mesh.userData.surface = name;
-      mesh.userData.assemblyPart = object.userData.assemblyPart;
-      const role = surfaceRole(name);
-      mesh.castShadow = role !== "glass" && role !== "acrylic";
-      // 只让查看器地面阴影板接收投影，避免薄卡面互相采样产生斜纹。
-      mesh.receiveShadow = false;
-      model.add(mesh);
-      meshes.push(mesh);
-    });
-    this.appearance.prepare(model);
-    this.appearance.apply(model, 1);
-    this.appearance.setClarity(model, 0);
-    // 拆解模型沿用当前详情的记录卡面。总览仍使用共享烘焙图。
-    const cardTexture = this.detailCardTexture(this.selectedIndex);
-    if (cardTexture) {
-      for (const mesh of meshes) {
-        if (surfaceRole(mesh.userData.surface as string) !== CARD_ROLE) continue;
-        const material = mesh.material as THREE.MeshPhysicalMaterial;
-        material.map = cardTexture;
-        material.needsUpdate = true;
-      }
-    }
-    let texture: THREE.CanvasTexture | undefined;
-    if (!this.bakedCardTexture) {
-      // 旧模型：卡面印在单独一块铭牌平面上。
-      const canvas = document.createElement("canvas");
-      canvas.width = this.labelCanvas.width;
-      canvas.height = this.labelCanvas.height;
-      canvas.getContext("2d")!.drawImage(this.labelCanvas, 0, 0);
-      texture = new THREE.CanvasTexture(canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-      const label = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.99, 0.46),
-        new THREE.MeshBasicMaterial({
-          map: texture,
-          toneMapped: false,
-          transparent: true,
-          depthWrite: false,
-        }),
-      );
-      label.position.set(-1.36, 3.04, 0.255);
-      label.userData.assemblyPart = "cover";
-      model.add(label);
-      meshes.push(label);
-    }
-    const hasReveal = meshes.some(
-      (mesh) => surfaceRole(mesh.userData.surface as string) === REVEAL_ROLE,
-    );
-    return {
-      model,
-      centerY: normalized.centerY,
-      hasReveal,
-      setClarity: (value: number) => this.appearance.setClarity(model, value),
-      dispose: () => {
-        for (const mesh of meshes) {
-          mesh.geometry.dispose();
-          (mesh.material as THREE.Material).dispose();
-        }
-        texture?.dispose();
-      },
-    };
-  }
-
   private captureFixedDetailCameraEntry() {
     this.camera.updateMatrixWorld(true);
     const offset = this.camera.position.clone().sub(this.cameraAim);
@@ -2301,14 +2049,7 @@ export class ArchiveScene {
       0,
       OVERVIEW_LIFT,
     );
-    if (this.fixedDetailCamera) {
-      return OVERVIEW_VISUAL_LIFT * overviewLift;
-    }
-    return (
-      OVERVIEW_VISUAL_LIFT *
-      overviewLift *
-      (1 - this.detail)
-    );
+    return OVERVIEW_VISUAL_LIFT * overviewLift;
   }
 
   /** Solve a 3/4-front hero close-up pose at constant telephoto FOV. */
@@ -2473,22 +2214,20 @@ export class ArchiveScene {
   setMode(mode: "archive" | "detail") {
     this.cancelPointer();
     this.setHover(null);
-    if (this.fixedDetailCamera) {
-      if (mode === "detail") {
-        if (!this.fixedDetailCameraHeld) {
-          this.detailCameraMove = { value: 0, velocity: 0 };
-          this.detailCameraAimMove = { value: 0, velocity: 0 };
-          if (this.overviewCameraReady) {
-            this.captureFixedDetailCameraEntry();
-          }
+    if (mode === "detail") {
+      if (!this.fixedDetailCameraHeld) {
+        this.detailCameraMove = { value: 0, velocity: 0 };
+        this.detailCameraAimMove = { value: 0, velocity: 0 };
+        if (this.overviewCameraReady) {
+          this.captureFixedDetailCameraEntry();
         }
-        this.fixedDetailLiftTarget = INSPECTION_LIFT;
-        this.fixedDetailTargetPose = undefined;
-        this.fixedDetailCameraBasis = undefined;
-        this.fixedDetailCameraHeld = true;
-      } else if (!this.fixedDetailCameraPose) {
-        this.fixedDetailCameraHeld = false;
       }
+      this.fixedDetailLiftTarget = INSPECTION_LIFT;
+      this.fixedDetailTargetPose = undefined;
+      this.fixedDetailCameraBasis = undefined;
+      this.fixedDetailCameraHeld = true;
+    } else if (!this.fixedDetailCameraPose) {
+      this.fixedDetailCameraHeld = false;
     }
     if (mode === "detail") {
       this.finishIntro(true);
@@ -2526,7 +2265,6 @@ export class ArchiveScene {
     if (!value.idleWave) this.idleGain = 0;
     this.motion = { ...value };
   }
-  private get reduced() { return Object.values(this.motion).every(value => !value); }
   setQuality(value: RenderQuality | boolean) {
     const quality =
       typeof value === "boolean"
@@ -2536,20 +2274,6 @@ export class ArchiveScene {
     if (this.appliedQuality === key) return;
     this.appliedQuality = key;
     this.quality = quality;
-    if (quality.aoSamples && quality.aoSamples !== this.aoKernelSize) {
-      const old = this.ao;
-      this.ao = new SharedDepthAO(this.scene, this.camera, 1, 1, quality.aoSamples);
-      this.ao.kernelRadius = old.kernelRadius;
-      this.ao.minDistance = old.minDistance;
-      this.ao.maxDistance = old.maxDistance;
-      const index = this.composer.passes.indexOf(old);
-      this.composer.removePass(old);
-      this.composer.insertPass(this.ao, index);
-      old.dispose();
-      this.aoKernelSize = quality.aoSamples;
-    }
-    // Fixed-detail Web view maintains its own lighting rig; keep AO off there.
-    this.ao.enabled = quality.aoSamples > 0 && !this.fixedDetailCamera;
     this.bokeh.enabled = this.shouldEnableBokeh();
     this.smaa.enabled = quality.antialias === "smaa";
     this.renderer.shadowMap.enabled = quality.shadows > 0;
@@ -2664,9 +2388,6 @@ export class ArchiveScene {
     this.lastInteraction = this.clock;
     const indexChanged = index !== this.selectedIndex;
     this.selectedIndex = index;
-    if (this.targetDetail <= 0) {
-      this.cancelDetailSurfacePreparation();
-    }
     const next = fileLocation(index).slot;
     const previousCell = this.selectedCell;
     const cell = selectionCell(index, previousCell, navigation, this.coordinateOrigin.row);
@@ -2700,7 +2421,6 @@ export class ArchiveScene {
         this.appearanceInSlot(
           this.lift.value,
           this.slotUnderlights.directFor(previousCell),
-          this.overviewBottomLight.value,
         ),
       );
       this.appearance.setClarity(group, 0);
@@ -2801,8 +2521,6 @@ export class ArchiveScene {
       entry.texture.dispose();
     }
     this.hoverBadgeCache.clear();
-    this.detailSurfaceIndex = -1;
-    this.cancelDetailSurfacePreparation();
 
     const loc = fileLocation(target);
     this.selectedIndex = target;
@@ -2878,9 +2596,6 @@ export class ArchiveScene {
     if (index === this.overviewBadgeFullIndex) {
       this.overviewBadgeFullDirty = true;
     }
-    if (index === this.detailSurfaceIndex) {
-      this.detailSurfaceIndex = -1;
-    }
     if (index === this.selectedIndex && this.loaded) {
       this.overviewBadgeDirty = true;
       if (this.intro) this.pendingOverviewBadgeRefresh = true;
@@ -2953,254 +2668,6 @@ export class ArchiveScene {
   }
   private disposeOutgoing(group: THREE.Group) {
     this.appearance.dispose(group);
-  }
-  /**
-   * 按档案重绘整张卡面。REF 版式以 2000 × 1480 的参考贴图为基准：
-   * X-001 直接使用 GLB 里烘焙的参考卡面；其他档案沿用同一套版式，
-   * 只替换编号、标题、描述、chips 与展示图占位。
-   */
-  private drawCardFace(index: number): boolean {
-    if (!this.cardCanvas) {
-      this.cardCanvas = document.createElement("canvas");
-      this.cardCanvas.width = CARD_WIDTH;
-      this.cardCanvas.height = CARD_HEIGHT;
-    }
-    if (!this.cardTexture) {
-      this.cardTexture = new THREE.CanvasTexture(this.cardCanvas);
-      // glTF 的 UV 原点在左上；CanvasTexture 默认 flipY 会让详情卡面倒置。
-      this.cardTexture.flipY = false;
-      this.cardTexture.colorSpace = THREE.SRGBColorSpace;
-      this.cardTexture.anisotropy =
-        this.renderer.capabilities.getMaxAnisotropy();
-    }
-    const c = this.cardCanvas.getContext("2d");
-    if (!c) return false;
-    const record = records[index];
-    const fallback = String(Math.max(0, Math.floor(index)) + 1).padStart(3, "0");
-    const code = (record?.id || "X-" + fallback).replace(/^X-/, "").trim();
-    const title = (record?.title || record?.en || "").trim().replace("·", " · ");
-    const model = (record?.en || "").trim();
-    const department = (record?.department || record?.category || "").trim();
-    const abstract = (record?.abstract || "").trim();
-    const clearance = (record?.clearance || "").trim();
-    const findings = record?.findings?.length ?? 0;
-    const isReference = (record?.id || "") === "X-001";
-
-    c.save();
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.textAlign = "left";
-    c.textBaseline = "alphabetic";
-
-    if (isReference && this.bakedCardImage) {
-      c.drawImage(this.bakedCardImage, 0, 0, CARD_WIDTH, CARD_HEIGHT);
-      c.restore();
-      this.cardTexture.needsUpdate = true;
-      return true;
-    }
-
-    // 纸面
-    c.fillStyle = WARM.card;
-    c.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
-
-    // 巨大浅灰编号，保留参考图的「001」水印
-    c.save();
-    c.fillStyle = "#f0e8dc";
-    c.font = "bold 430px 'Segoe UI', sans-serif";
-    c.textBaseline = "top";
-    c.fillText(code, 978, 956);
-    c.restore();
-
-    // 顶部稀疏刻度
-    c.fillStyle = WARM.ruler;
-    let tick = 0;
-    for (let x = 33; x < CARD_WIDTH; x += 122) {
-      if (!((x >= 0 && x <= 294) || (x >= 1530 && x <= 1896))) {
-        const h = tick % 3 === 0 ? 30 : 20;
-        c.fillRect(x, 44 - h, 3.5, h);
-      }
-      tick++;
-    }
-
-    // 左上档案牌
-    const bx0 = 82;
-    const bx1 = 570;
-    const by0 = 64;
-    const headY = 98;
-    const bodyY = 236;
-    const by1 = 243;
-    c.fillStyle = "#474d4d";
-    c.fillRect(bx0, by0, bx1 - bx0, headY - by0);
-    c.fillStyle = "#fdfdfb";
-    c.fillRect(bx0, headY, bx1 - bx0, bodyY - headY);
-    c.fillStyle = "#606665";
-    c.fillRect(bx0, bodyY, bx1 - bx0, by1 - bodyY);
-    c.fillRect(bx0, headY, 3, bodyY - headY);
-    c.fillRect(bx1 - 3, headY, 3, bodyY - headY);
-    c.fillStyle = "#ffffff";
-    c.font = "bold 22px MiSans, sans-serif";
-    c.fillText("DEEPDEMOS", bx0 + 24, 86);
-    c.fillStyle = WARM.frameInner;
-    c.font = "20px MiSans, sans-serif";
-    c.textAlign = "right";
-    c.fillText("INFO", bx1 - 24, 86);
-    c.textAlign = "left";
-    c.fillStyle = "#1c2124";
-    const codeLabel = fitCanvasText(
-      c,
-      "NO." + code,
-      350,
-      100,
-      "MiSans, sans-serif",
-      "bold",
-    );
-    c.fillText(codeLabel.text, bx0 + 24, 218);
-    c.fillStyle = "#969c98";
-    c.font = "22px MiSans, sans-serif";
-    c.textAlign = "right";
-    c.fillText("+ / -", bx1 - 24, 228);
-    c.textAlign = "left";
-
-    // 右上元信息与条形码
-    c.fillStyle = "#474d4d";
-    c.font = "20px MiSans, sans-serif";
-    c.textAlign = "right";
-    c.fillText("2026 · WEB · 1 RECORD", 1920, 150);
-    const barcodeX0 = 1612;
-    const barcodeX1 = 1920;
-    const barcodeY0 = 108;
-    const barcodeY1 = 190;
-    c.fillStyle = "#ffffff";
-    c.fillRect(barcodeX0, barcodeY0, barcodeX1 - barcodeX0, barcodeY1 - barcodeY0);
-    c.fillStyle = "#000000";
-    let seed = 20261116;
-    let barX = barcodeX0;
-    const unit = (barcodeX1 - barcodeX0) / 150;
-    while (barX < barcodeX1) {
-      seed = (1103515245 * seed + 12345) & 0x7fffffff;
-      const w = Math.max(2, (1 + (seed % 4)) * unit);
-      seed = (1103515245 * seed + 12345) & 0x7fffffff;
-      const gap = Math.max(2, (1 + (seed % 3)) * unit);
-      c.fillRect(barX, barcodeY0, Math.min(w, barcodeX1 - barX), barcodeY1 - barcodeY0);
-      barX += w + gap;
-    }
-    c.fillStyle = "#474d4d";
-    c.font = "15px MiSans, sans-serif";
-    c.fillText(model, 1919, 202);
-    c.textAlign = "left";
-
-    // 展示图：X-001 用烘焙原图；其他档案用同尺寸占位
-    const artX = 82;
-    const artY = 294;
-    const artW = 1839;
-    const artH = 641;
-    c.fillStyle = "#474d4d";
-    c.fillRect(artX, artY, artW, artH);
-    const grad = c.createLinearGradient(artX, artY, artX, artY + artH);
-    grad.addColorStop(0, "#74c7bd");
-    grad.addColorStop(0.62, "#d9e6c8");
-    grad.addColorStop(1, "#4f9d99");
-    c.fillStyle = grad;
-    c.fillRect(artX + 6, artY + 6, artW - 12, artH - 12);
-    c.fillStyle = "rgba(255,255,255,0.18)";
-    for (let i = 0; i < 28; i++) {
-      c.fillRect(artX + 80 + i * 62, artY + 40, 2, artH - 80);
-    }
-    c.fillStyle = "#ffffff";
-    c.beginPath();
-    c.arc(artX + artW * 0.72, artY + artH * 0.34, 72, 0, Math.PI * 2);
-    c.fill();
-    c.fillStyle = WARM.ink;
-    c.font = "bold 96px MiSans, sans-serif";
-    c.textAlign = "center";
-    c.fillText("DS DEMO", artX + artW / 2, artY + artH / 2 + 34);
-    c.textAlign = "left";
-
-    // 标题与黄色高亮。高亮跟随标题末尾，短标题不会在右侧留下孤立色块。
-    const fittedTitle = fitCanvasText(
-      c,
-      title || "UNTITLED",
-      1300,
-      154,
-      "MiSans, sans-serif",
-      "bold",
-    );
-    const titleText = fittedTitle.text;
-    const titleSize = fittedTitle.size;
-    const titleWidth = Math.min(1300, c.measureText(titleText).width);
-    const highlightWidth = Math.min(428, Math.max(120, titleWidth * 0.34));
-    c.fillStyle = "#ffdf8c";
-    c.fillRect(
-      88 + titleWidth - highlightWidth + 8,
-      1123,
-      highlightWidth,
-      44,
-    );
-    c.fillStyle = "#1c2124";
-    c.font = `bold ${titleSize}px MiSans, sans-serif`;
-    c.fillText(titleText, 88, 1185);
-
-    // 描述
-    c.fillStyle = "#6e7673";
-    const abstractText = fitCanvasText(
-      c,
-      abstract,
-      900,
-      30,
-      "MiSans, sans-serif",
-    ).text;
-    c.fillText(abstractText, 84, 1238);
-
-    // 数据 chips
-    const chips = [
-      { label: model || "未标注模型", x: 82, w: 324, solid: true },
-      { label: department || "未标注平台", x: 425, w: 134, solid: false },
-      { label: findings + " 条记录", x: 578, w: 158, solid: false },
-      { label: clearance || "WEB", x: 755, w: 105, solid: false },
-    ];
-    for (const chip of chips) {
-      c.fillStyle = chip.solid ? "#1c2124" : "#fcfcfa";
-      c.fillRect(chip.x, 1262, chip.w, 55);
-      c.strokeStyle = chip.solid ? "#1c2124" : "#969e9a";
-      c.lineWidth = 2;
-      c.strokeRect(chip.x + 1, 1263, chip.w - 2, 53);
-      c.fillStyle = chip.solid ? "#ffffff" : "#3c4240";
-      const chipText = fitCanvasText(
-        c,
-        chip.label,
-        chip.w - 24,
-        24,
-        "MiSans, sans-serif",
-      ).text;
-      c.textAlign = "center";
-      c.fillText(chipText, chip.x + chip.w / 2, 1298);
-      c.textAlign = "left";
-    }
-
-    // 右侧标题，不铺底色
-    c.fillStyle = "#0b0e0e";
-    c.font = "bold 26px MiSans, sans-serif";
-    c.textAlign = "right";
-    c.fillText(isReference ? "SUN SHOWER" : model || "ARCHIVE", 1939, 1200);
-    c.fillStyle = "#6a6e6a";
-    c.font = "19px MiSans, sans-serif";
-    c.fillText(isReference ? "OVER THE HARBOR" : department || "DEMO ARCHIVE", 1939, 1230);
-    c.textAlign = "left";
-
-    // 页脚
-    c.fillStyle = "#bfc1be";
-    c.fillRect(82, 1403, 1838, 2);
-    c.fillStyle = "#6e7673";
-    c.font = "19px MiSans, sans-serif";
-    c.fillText("DEEPDEMOS.TOP · AI DEMO ARCHIVE", 84, 1435);
-    c.fillStyle = "#1c2124";
-    c.font = "bold 20px MiSans, sans-serif";
-    c.textAlign = "right";
-    c.fillText("DD / AI", 1919, 1435);
-    c.textAlign = "left";
-
-    c.restore();
-    this.cardTexture.needsUpdate = true;
-    return true;
   }
   private drawLabel(index: number) {
     if (!this.labelTexture) return;
@@ -3978,7 +3445,6 @@ export class ArchiveScene {
   }
   private get useCleanEcoBudget() {
     return (
-      this.fixedDetailCamera &&
       !this.superPerformance &&
       matchingPreset(this.quality) === "original"
     );
@@ -3986,16 +3452,11 @@ export class ArchiveScene {
   private shouldEnableBokeh() {
     return (
       this.quality.depthOfField > 0 &&
-      (!this.fixedDetailCamera ||
-        this.warmingUp ||
-        this.detail > 0.01 ||
-        this.targetDetail > 0)
+      (this.warmingUp || this.detail > 0.01 || this.targetDetail > 0)
     );
   }
   private get transmissionScale() {
-    return this.fixedDetailCamera || (this.detail < 0.01 && !this.targetDetail)
-      ? Math.min(this.quality.transmission, OVERVIEW_TRANSMISSION_LIMIT)
-      : this.quality.transmission;
+    return Math.min(this.quality.transmission, OVERVIEW_TRANSMISSION_LIMIT);
   }
   private canvasRect() {
     if (
@@ -4019,7 +3480,7 @@ export class ArchiveScene {
       : this.useCleanEcoBudget
         ? 2_073_600
         : 8_294_400;
-    const dimensions = resizeQuality(
+    resizeQuality(
       this.renderer,
       this.composer,
       this.container,
@@ -4027,20 +3488,12 @@ export class ArchiveScene {
       this.superPerformance,
       pixelBudget,
     );
-    this.ao.setSize(
-      Math.max(1, Math.floor(dimensions.width * this.quality.aoResolution)),
-      Math.max(1, Math.floor(dimensions.height * this.quality.aoResolution)),
-    );
     this.bokeh.enabled = this.shouldEnableBokeh();
-    this.ao.setSharing(this.ao.enabled && this.bokeh.enabled && this.quality.aoResolution === 1 && !this.superPerformance);
     const transmission = this.transmissionScale;
     this.renderer.transmissionResolutionScale = transmission;
     this.container.dataset.renderQuality = JSON.stringify({
       ...this.readRenderMetrics(),
       transmission,
-      aoSamples: this.ao.enabled ? this.aoKernelSize : 0,
-      aoWidth: this.ao.width,
-      aoHeight: this.ao.height,
       shadows: this.renderer.shadowMap.enabled
         ? this.light.shadow.mapSize.x
         : 0,
@@ -4641,9 +4094,7 @@ export class ArchiveScene {
       this.pulseGain = pulseTarget;
     }
     // Fixed Web detail frames keep the overview field while logical detail
-    // advances independently for decryption and application state.
-    const fieldDetail = this.fixedDetailCamera ? 0 : this.detail;
-    const fieldLightOverview = 1 - fieldDetail;
+    // advances independently for application state.
     const fieldCache = new Map<number, Map<number, number>>();
     const introFieldState = this.intro ?? this.introRelease;
     const introOrigin = this.introRelease?.cell ?? this.selectedCell;
@@ -4709,7 +4160,7 @@ export class ArchiveScene {
       const columnWave = THREE.MathUtils.lerp(
         columnStrength(lane, this.laneFocus.value),
         1,
-        0.18 * (1 - fieldDetail),
+        0.18,
       );
       const settling = settlingWave(
         distance * (ROW_SPACING / REFERENCE_ROW_SPACING),
@@ -4718,13 +4169,8 @@ export class ArchiveScene {
       // Lift the static rear trough back to the slot plane with a soft edge.
       const planeTransition =
         THREE.MathUtils.smoothstep(settling, 0, 0.16);
-      const planarSettling =
+      const overviewSettling =
         Math.max(0, settling) * planeTransition;
-      const overviewSettling = THREE.MathUtils.lerp(
-        settling,
-        planarSettling,
-        fieldLightOverview,
-      );
       if (introFieldState) {
         const rightOffset =
           (lane - introOrigin.lane) * COLUMN_SPACING * OVERVIEW_RIGHT_X +
@@ -4738,20 +4184,14 @@ export class ArchiveScene {
         const terraceWeight = THREE.MathUtils.lerp(terrace, 1, introRelease);
         return (
           terraceTarget * terraceWeight +
-          breathing *
-            THREE.MathUtils.lerp(1, planeTransition, fieldLightOverview) *
-            terraceWeight +
+          breathing * planeTransition * terraceWeight +
           crest * (1 - introRelease) +
           pulseHeight
         );
       }
       return (
         overviewSettling * columnWave +
-        breathing * THREE.MathUtils.lerp(
-          1,
-          planeTransition,
-          fieldLightOverview,
-        ) +
+        breathing * planeTransition +
         pulseHeight
       );
     };
@@ -4772,9 +4212,7 @@ export class ArchiveScene {
       this.lift.velocity = 0;
     } else {
       this.returnY = null;
-      const detailLift = this.fixedDetailCamera
-        ? (this.fixedDetailLiftTarget ?? INSPECTION_LIFT)
-        : INSPECTION_LIFT;
+      const detailLift = this.fixedDetailLiftTarget ?? INSPECTION_LIFT;
       const liftTarget = this.targetDetail
         ? detailLift
         : this.outgoing.some(
@@ -4793,7 +4231,7 @@ export class ArchiveScene {
         damp(
           this.lift,
           liftTarget,
-          this.fixedDetailCamera && this.targetDetail
+          this.targetDetail
             ? DETAIL_LIFT_OPEN_RATE
             : this.deferSelectionPulse &&
                 !this.targetDetail &&
@@ -4805,28 +4243,17 @@ export class ArchiveScene {
         snapSpring(this.lift, liftTarget);
       }
     }
-    const cameraTarget = this.fixedDetailCamera
-      ? this.targetDetail
-      : this.targetDetail
-        ? ease((this.lift.value - 0.8) / 2.4)
-        : this.returnY !== null
-          ? this.detail
-          : ease(
-              (this.lift.value - OVERVIEW_LIFT) /
-                (INSPECTION_LIFT - OVERVIEW_LIFT),
-            );
+    const cameraTarget = this.targetDetail;
     this.detail = THREE.MathUtils.lerp(this.detail, cameraTarget, detailBlend);
     if (Math.abs(this.detail - cameraTarget) < 0.001) {
       this.detail = cameraTarget;
     }
     const detail = this.detail;
-    const renderDetail = this.fixedDetailCamera ? 0 : detail;
-    const lightOverview = 1 - renderDetail;
     const selectedVisualLift = this.overviewVisualLift();
     const selectedDirectLight = this.slotUnderlights.directFor(this.selectedCell);
     this.appearance.apply(
       this.model,
-      this.appearanceInSlot(this.lift.value, selectedDirectLight, lightOverview),
+      this.appearanceInSlot(this.lift.value, selectedDirectLight),
     );
     this.appearance.setClarity(this.model, 0);
     this.setGroupSlotLight(
@@ -4860,8 +4287,7 @@ export class ArchiveScene {
         baseY +
           o.lift.value +
           OVERVIEW_VISUAL_LIFT *
-            THREE.MathUtils.smoothstep(o.lift.value, 0, OVERVIEW_LIFT) *
-            (1 - renderDetail) +
+            THREE.MathUtils.smoothstep(o.lift.value, 0, OVERVIEW_LIFT) +
           hoverLift(o.cell),
         p.z + entryZ + this.rail.value,
       );
@@ -4869,7 +4295,7 @@ export class ArchiveScene {
       const directLight = this.slotUnderlights.directFor(o.cell);
       this.appearance.apply(
         o.group,
-        this.appearanceInSlot(o.lift.value, directLight, lightOverview),
+        this.appearanceInSlot(o.lift.value, directLight),
       );
       this.appearance.setClarity(o.group, 0);
       this.setGroupSlotLight(
@@ -4883,7 +4309,6 @@ export class ArchiveScene {
       o.group.rotation.x =
         (field(row + 0.5, lane) - field(row - 0.5, lane)) *
         0.024 *
-        (1 - renderDetail) *
         (1 - quality);
       if (
         Math.abs(o.lift.value) < OUTGOING_FINISH_LIFT &&
@@ -4926,7 +4351,6 @@ export class ArchiveScene {
       (field(selectedRow + 0.5, selectedLane) -
         field(selectedRow - 0.5, selectedLane)) *
         0.024 *
-        (1 - renderDetail) *
         (1 - ease(this.lift.value / OVERVIEW_LIFT)),
       this.rotation,
       0,
@@ -5000,22 +4424,19 @@ export class ArchiveScene {
     } else {
       // A direct detail URL has no overview frame yet. Seed and capture the
       // ordinary overview pose here rather than duplicating its construction.
-      const cameraDetail = renderDetail;
       const span = 6.3;
-      const distance = THREE.MathUtils.lerp(55, 72, cameraDetail);
+      const distance = 55;
       const cameraAim = new THREE.Vector3(-0.62, -0.13, 0.43);
       const viewDirection = new THREE.Vector3(
         -Math.sin(OVERVIEW_AZIMUTH) * Math.cos(OVERVIEW_ELEVATION),
         Math.sin(OVERVIEW_ELEVATION),
         Math.cos(OVERVIEW_AZIMUTH) * Math.cos(OVERVIEW_ELEVATION),
-      )
-        .lerp(new THREE.Vector3(-0.277, 0.238, 0.931), cameraDetail)
-        .normalize();
+      ).normalize();
       const framing = archiveFraming(
         this.container.clientWidth,
         this.container.clientHeight,
         span,
-        cameraDetail,
+        0,
         this.container.closest<HTMLElement>("[data-layout]")?.dataset.layout ===
           "compact",
       );
@@ -5048,18 +4469,6 @@ export class ArchiveScene {
         );
         cameraAim.addScaledVector(up, 0.037 * framing.span);
       }
-      const detailAim = this.model.position
-        .clone()
-        .add(new THREE.Vector3(0, this.modelCenterY, 0));
-      detailAim.addScaledVector(
-        right,
-        (0.5 - framing.detailX) * width / pixelScale,
-      );
-      detailAim.addScaledVector(
-        up,
-        (framing.detailY - 0.5) * height / pixelScale,
-      );
-      cameraAim.lerp(detailAim, cameraDetail);
       const cameraPosition = cameraAim
         .clone()
         .addScaledVector(viewDirection, distance);
@@ -5085,7 +4494,7 @@ export class ArchiveScene {
         this.cameraAim.copy(cameraAim);
       }
       this.camera.lookAt(this.cameraAim);
-      this.camera.rotateZ(LIGHT_OVERVIEW_ROLL * (1 - cameraDetail));
+      this.camera.rotateZ(LIGHT_OVERVIEW_ROLL);
       const targetFov = THREE.MathUtils.radToDeg(
         2 * Math.atan(framing.span / (2 * distance)),
       );
@@ -5104,21 +4513,16 @@ export class ArchiveScene {
     // fog to the rendered camera, or entry puts the array behind the far plane
     // until the camera catches up (a brief white wash that exit never showed).
     const renderedDistance = this.camera.position.distanceTo(this.cameraAim);
-    fog.near =
-      renderedDistance +
-      THREE.MathUtils.lerp(5, -1, renderDetail) -
-      2 * lightOverview;
-    fog.far =
-      renderedDistance +
-      THREE.MathUtils.lerp(25, 12, renderDetail);
+    fog.near = renderedDistance + 3;
+    fog.far = renderedDistance + 25;
     fog.color.copy(OVERVIEW_MIST);
     (this.scene.background as THREE.Color).copy(OVERVIEW_MIST);
     // Unified studio rig across overview and detail: soft warm key (with real
     // soft shadows) + sky/bounce hemisphere + front-right fill + warm slot strip.
-    this.scene.environmentIntensity = THREE.MathUtils.lerp(0.18, 0.3, renderDetail);
-    this.studioSkyLight.intensity = THREE.MathUtils.lerp(0.22, 0.28, renderDetail);
+    this.scene.environmentIntensity = 0.18;
+    this.studioSkyLight.intensity = 0.22;
     this.fillLight.color.copy(LIGHT_OVERVIEW_FILL_COLOR);
-    this.fillLight.intensity = THREE.MathUtils.lerp(0.07, 0.22, renderDetail);
+    this.fillLight.intensity = 0.07;
     this.fillLight.position.copy(LIGHT_OVERVIEW_FILL_POSITION);
     this.overviewTrackOffset.value.set(
       trackX,
@@ -5133,8 +4537,7 @@ export class ArchiveScene {
       OVERVIEW_RECT_LIGHT_Z_OFFSET;
     const stripGain =
       this.slotUnderlights.barIntensity *
-      this.overviewSlotLightGain.value *
-      THREE.MathUtils.lerp(1, 0.72, renderDetail);
+      this.overviewSlotLightGain.value;
     this.overviewAreaLight.position.set(
       stripX,
       OVERVIEW_RECT_LIGHT_Y,
@@ -5152,57 +4555,32 @@ export class ArchiveScene {
     this.overviewLightStrip.position.set(stripX, -4.52, stripZ);
     this.overviewLightStripMaterial.opacity = Math.min(1, 0.95 * stripGain);
     this.overviewLightStrip.visible = stripGain > 0.005;
-    this.lightKeyPositionScratch.lerpVectors(
-      LIGHT_OVERVIEW_KEY_POSITION,
-      LIGHT_DETAIL_KEY_POSITION,
-      renderDetail,
-    );
-    this.lightKeyTargetScratch.lerpVectors(
-      LIGHT_OVERVIEW_KEY_TARGET,
-      LIGHT_DETAIL_KEY_TARGET,
-      renderDetail,
-    );
     this.light.color.copy(LIGHT_OVERVIEW_KEY_COLOR);
     this.light.castShadow = true;
     this.light.shadow.radius = 4;
     this.light.angle = 0.56;
     this.light.penumbra = 0.96;
     this.light.decay = 1.62;
-    this.light.position.copy(this.lightKeyPositionScratch);
-    this.light.target.position.copy(this.lightKeyTargetScratch);
-    this.light.intensity = THREE.MathUtils.lerp(205, LIGHT_DETAIL_KEY_INTENSITY, renderDetail);
-    this.overviewBottomLight.value = lightOverview;
+    this.light.position.copy(LIGHT_OVERVIEW_KEY_POSITION);
+    this.light.target.position.copy(LIGHT_OVERVIEW_KEY_TARGET);
+    this.light.intensity = 205;
+    this.overviewBottomLight.value = 1;
 
     if (this.fixedDetailCameraHeld && this.fixedDetailCameraPose) {
       this.applyFixedDetailProjection(cameraMove);
     } else {
       this.camera.updateProjectionMatrix();
-      // 固定详情相机还没取到位姿的那一帧按总览投影校准。
-      const projectionOverview = this.fixedDetailCameraHeld ? 1 : lightOverview;
       // Keep the light-overview calibration in the projection matrix so camera
       // picking, coverage and WebGL rendering share one optical transform.
-      this.camera.projectionMatrix.elements[0] *= THREE.MathUtils.lerp(
-        1,
-        LIGHT_OVERVIEW_HORIZONTAL_SCALE,
-        projectionOverview,
-      );
-      this.camera.projectionMatrix.elements[5] *= THREE.MathUtils.lerp(
-        1,
-        LIGHT_OVERVIEW_VERTICAL_SCALE,
-        projectionOverview,
-      );
+      this.camera.projectionMatrix.elements[0] *= LIGHT_OVERVIEW_HORIZONTAL_SCALE;
+      this.camera.projectionMatrix.elements[5] *= LIGHT_OVERVIEW_VERTICAL_SCALE;
       this.camera.projectionMatrixInverse
         .copy(this.camera.projectionMatrix)
         .invert();
       this.camera.updateMatrixWorld();
-      if (this.fixedDetailCamera) {
-        this.overviewCameraReady = true;
-        if (
-          this.fixedDetailCameraHeld &&
-          !this.fixedDetailCameraPose
-        ) {
-          this.captureFixedDetailCameraEntry();
-        }
+      this.overviewCameraReady = true;
+      if (this.fixedDetailCameraHeld && !this.fixedDetailCameraPose) {
+        this.captureFixedDetailCameraEntry();
       }
     }
     // Build and compact the instance set only after the actual damped camera
@@ -5241,7 +4619,7 @@ export class ArchiveScene {
 
       const slope = field(row + .5, lane) - field(row - .5, lane);
       this.dummy.position.set(x, y, z);
-      this.dummy.rotation.set(slope * .024 * (1 - renderDetail), 0, 0);
+      this.dummy.rotation.set(slope * .024, 0, 0);
       this.dummy.scale.set(1, 1, 1);
       this.dummy.updateMatrix();
       this.shadowCoverage?.add(this.dummy.matrix);
@@ -5321,13 +4699,10 @@ export class ArchiveScene {
       this.pulseGain < 0.01;
     this.canInspect = detailSettled && this.clearance > 0.3;
     const fixedDetailRaised =
-      this.fixedDetailCamera &&
       detailSettled &&
       this.fixedDetailLiftTarget !== undefined &&
       this.lift.value >= this.fixedDetailLiftTarget - 0.04;
-    const inspectionReady = this.fixedDetailCamera
-      ? fixedDetailRaised && this.canInspect
-      : this.canInspect;
+    const inspectionReady = fixedDetailRaised && this.canInspect;
     let inspectionState = "preview";
     if (this.returnY !== null) inspectionState = "aligning";
     else if (inspectionReady) inspectionState = "ready";
@@ -5369,14 +4744,9 @@ export class ArchiveScene {
         cameraMove,
       );
     } else {
-      const focusHeight = THREE.MathUtils.lerp(
-        OVERVIEW_FOCUS_HEIGHT,
-        LIGHT_OVERVIEW_FOCUS_HEIGHT,
-        lightOverview,
-      );
       const focalPoint = this.focalPointScratch
         .copy(this.model.position)
-        .setY(this.model.position.y + focusHeight)
+        .setY(this.model.position.y + LIGHT_OVERVIEW_FOCUS_HEIGHT)
         .applyMatrix4(this.camera.matrixWorldInverse);
       bokehUniforms.focus.value = -focalPoint.z;
     }
@@ -5391,12 +4761,7 @@ export class ArchiveScene {
       this.renderState.invalidate();
     }
     bokehUniforms.aperture.value =
-      ((THREE.MathUtils.lerp(
-        OVERVIEW_APERTURE,
-        DETAIL_APERTURE,
-        renderDetail,
-      ) -
-        LIGHT_OVERVIEW_APERTURE_DELTA * lightOverview) *
+      ((OVERVIEW_APERTURE - LIGHT_OVERVIEW_APERTURE_DELTA) *
         this.quality.depthOfField) /
       100;
     const transmission = this.transmissionScale;
@@ -5434,7 +4799,7 @@ export class ArchiveScene {
       );
       state.floats(...this.camera.projectionMatrix.elements, ...this.camera.matrixWorldInverse.elements,
         ...this.camera.position.toArray(),
-        fog.near, fog.far, lightOverview,
+        fog.near, fog.far,
         this.studioSkyLight.intensity, this.scene.environmentIntensity,
         this.overviewTrackOffset.value.x, this.overviewTrackOffset.value.y,
         this.overviewSlotLightGain.value,

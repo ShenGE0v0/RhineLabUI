@@ -86,6 +86,27 @@ assert.ok(
   "Array handoff has the same surface",
 );
 
+// A surface crossing between 0 and >0 clearcoat/transmission retains a nonzero floor
+// so WebGL shader variants stay stable during transitions.
+const coatedHigh = new THREE.MeshPhysicalMaterial({
+  clearcoat: 0.28,
+  transmission: 0.9,
+});
+const coatedLow = new THREE.MeshPhysicalMaterial({
+  clearcoat: 0,
+  transmission: 0,
+});
+appearance.register("Coated", coatedHigh, coatedLow);
+const coatedMesh = new THREE.Mesh(new THREE.BoxGeometry(), coatedHigh);
+coatedMesh.userData.surface = "Coated";
+const coatedGroup = new THREE.Group();
+coatedGroup.add(coatedMesh);
+appearance.prepare(coatedGroup);
+appearance.apply(coatedGroup, 0);
+assert.ok(coatedMesh.material.clearcoat >= 0.000001);
+assert.ok(coatedMesh.material.transmission >= 0.000001);
+appearance.dispose(coatedGroup);
+
 const shader = {
   uniforms: {},
   vertexShader: "#include <begin_vertex>",
@@ -93,7 +114,13 @@ const shader = {
 };
 body.material.onBeforeCompile(shader, null);
 assert.equal(shader.uniforms.archiveQuality, body.userData.appearance);
-assert.ok(shader.fragmentShader.includes("roughnessFactor = mix(0.28"));
+assert.equal(shader.uniforms.archiveClarity, body.userData.glassClarity);
+assert.ok(shader.fragmentShader.includes("roughnessFactor = mix(mix(0.28,"));
+assert.ok(
+  shader.fragmentShader.includes(
+    "glassRevealAtHeight(archiveClarity, vArchiveHeight)",
+  ),
+);
 appearance.dispose(returning);
 assert.ok(body.material.color.r > 0);
 console.log(

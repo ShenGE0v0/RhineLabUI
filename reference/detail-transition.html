@@ -39,7 +39,7 @@ for(let i=0;i<Math.round(seconds*60);i++){
   samples.push({
     actualFog:THREE.MathUtils.smoothstep(depth,scene.scene.fog.near,scene.scene.fog.far),
     previousFog:THREE.MathUtils.smoothstep(depth,oldDistance+THREE.MathUtils.lerp(5,-1,d),oldDistance+THREE.MathUtils.lerp(25,12,d)),
-    rangeError:Math.abs(scene.scene.fog.near-scene.camera.position.distanceTo(scene.cameraAim)-THREE.MathUtils.lerp(5,-1,d)),
+    rangeError:Math.abs(scene.scene.fog.near-scene.camera.position.distanceTo(scene.cameraAim)-3),
     idleGain:scene.idleGain,
     modelY:scene.model.position.y,
   });
@@ -60,7 +60,6 @@ if(params.has('close')){
   scene.composer.setSize(1100,800);
   scene.camera.setViewOffset(1920,1080,0,180,1100,800);
 }
-if(params.has('noao'))scene.ao.enabled=false;
 if(params.has('noshadow'))scene.renderer.shadowMap.enabled=false;
 if(params.has('offset')){
   for(const mesh of scene.model.children){

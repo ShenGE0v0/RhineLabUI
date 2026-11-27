@@ -121,19 +121,13 @@ try {
       scene.resize();
       bench.draw();
       record(
-        "detail draws with shared packed depth",
-        scene.ao.normalRenderTarget.depthBuffer &&
-          scene.ao.normalRenderTarget.textures.length === 2,
+        "detail draws with composer hardware depth",
+        Boolean(scene.composer.renderTarget1.depthTexture),
       );
       record(
-        "shadow-only mesh restored after AO and colour passes",
+        "shadow-only mesh restored after colour pass",
         scene.shadowCoverage.mesh.visible &&
           scene.shadowCoverage.mesh.count > 0,
-      );
-      record(
-        "AO fullscreen targets have no redundant depth",
-        !scene.ao.ssaoRenderTarget.depthBuffer &&
-          !scene.ao.blurRenderTarget.depthBuffer,
       );
       const coverage = scene.shadowCoverage.mesh;
       let disposed = false;

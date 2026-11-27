@@ -4,12 +4,13 @@ export interface CleanCoverUpdate {
   animated: boolean;
 }
 
-const SCATTER = 0.2;
+const TILE_COLUMNS = 3;
+const TILE_ROWS = 2;
 const TILE_FADE_FRACTION = 0.4;
 
 const REVEAL_DURATION_MS = 420;
 const MORPH_DURATION_MS = 380;
-const HIDE_DURATION_MS = 280;
+const HIDE_DURATION_MS = 480;
 
 const SWEEP_DEBOUNCE_MS = 85;
 const SWEEP_MAX_WAIT_MS = 220;
@@ -29,17 +30,8 @@ function easeOutQuad(t: number): number {
   return 1 - inv * inv;
 }
 
-function easeScanWave(t: number): number {
+function easeDissolve(t: number): number {
   return 0.45 * t + 0.55 * Math.sin(t * Math.PI * 0.5);
-}
-
-function cellHash(col: number, row: number, seed: number): number {
-  let h =
-    Math.imul(col + 1, 374761393) ^
-    Math.imul(row + 1, 668265263) ^
-    Math.imul(seed + 1, 2147483647);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
 function measureCanvasBox(el: HTMLElement): {
@@ -77,7 +69,7 @@ function measureCanvasBox(el: HTMLElement): {
 
 /**
  * Renders the clean-mode top-right archive cover preview with a HiDPI
- * offscreen-composited `<canvas>` pixel-block wave dissolve and burst
+ * offscreen-composited `<canvas>` randomized tile dissolve and burst
  * coalescing. Any interruption captures the live visible frame into
  * `fromCanvas` so rapid multi-card sweeps never flash, snap back, or strobe.
  */
@@ -100,9 +92,6 @@ export class CleanCoverPreview {
   private cssW = 0;
   private radiusPx = 4;
 
-  private cols = 0;
-  private rows = 0;
-  private gridSeed = 17;
   private cellX = new Int32Array(0);
   private cellY = new Int32Array(0);
   private cellW = new Int32Array(0);
@@ -186,58 +175,51 @@ export class CleanCoverPreview {
     }
   }
 
-  private rebuildGrid(seed: number) {
-    if (this.pw <= 0 || this.ph <= 0) return;
-    const cols = 3;
-    const rows = 2;
-
-    if (
-      cols === this.cols &&
-      rows === this.rows &&
-      seed === this.gridSeed &&
-      this.tileDelays.length === cols * rows
-    ) {
-      return;
-    }
-
-    this.cols = cols;
-    this.rows = rows;
-    this.gridSeed = seed;
-
-    const cellX = new Int32Array(cols);
-    const cellW = new Int32Array(cols);
-    for (let c = 0; c < cols; c++) {
-      const x0 = Math.round((c / cols) * this.pw);
-      const x1 = Math.round(((c + 1) / cols) * this.pw);
+  private rebuildGrid() {
+    const cellX = new Int32Array(TILE_COLUMNS);
+    const cellW = new Int32Array(TILE_COLUMNS);
+    for (let c = 0; c < TILE_COLUMNS; c++) {
+      const x0 = Math.round((c / TILE_COLUMNS) * this.pw);
+      const x1 = Math.round(((c + 1) / TILE_COLUMNS) * this.pw);
       cellX[c] = x0;
       cellW[c] = Math.max(1, x1 - x0);
     }
 
-    const cellY = new Int32Array(rows);
-    const cellH = new Int32Array(rows);
-    for (let r = 0; r < rows; r++) {
-      const y0 = Math.round((r / rows) * this.ph);
-      const y1 = Math.round(((r + 1) / rows) * this.ph);
+    const cellY = new Int32Array(TILE_ROWS);
+    const cellH = new Int32Array(TILE_ROWS);
+    for (let r = 0; r < TILE_ROWS; r++) {
+      const y0 = Math.round((r / TILE_ROWS) * this.ph);
+      const y1 = Math.round(((r + 1) / TILE_ROWS) * this.ph);
       cellY[r] = y0;
       cellH[r] = Math.max(1, y1 - y0);
-    }
-
-    const tileDelays = new Float32Array(cols * rows);
-    const span = cols - 1;
-    let idx = 0;
-    for (let r = 0; r < rows; r++) {
-      const fromLeft = ((r + seed) & 1) === 0;
-      for (let c = 0; c < cols; c++) {
-        const distance = (fromLeft ? c : span - c) / span;
-        const offset = distance * (1 - SCATTER) + cellHash(c, r, seed) * SCATTER;
-        tileDelays[idx++] = offset * (1 - TILE_FADE_FRACTION);
-      }
     }
 
     this.cellX = cellX;
     this.cellY = cellY;
     this.cellW = cellW;
     this.cellH = cellH;
+  }
+
+  private shuffleTileDelays() {
+    const order = Array.from(
+      { length: TILE_COLUMNS * TILE_ROWS },
+      (_, tile) => tile,
+    );
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+
+    if (order[0] === this.tileDelays.indexOf(0)) {
+      const j = 1 + Math.floor(Math.random() * (order.length - 1));
+      [order[0], order[j]] = [order[j], order[0]];
+    }
+
+    const tileDelays = new Float32Array(order.length);
+    const delayStep = (1 - TILE_FADE_FRACTION) / (order.length - 1);
+    order.forEach((tile, i) => {
+      tileDelays[tile] = i * delayStep;
+    });
     this.tileDelays = tileDelays;
   }
 
@@ -266,9 +248,7 @@ export class CleanCoverPreview {
     this.fromCanvas.height = ph;
     this.toCanvas.width = pw;
     this.toCanvas.height = ph;
-    this.cols = 0;
-    this.rows = 0;
-    this.rebuildGrid(this.gridSeed);
+    this.rebuildGrid();
 
     if (savedFrom && this.fromCtx) {
       this.fromCtx.clearRect(0, 0, pw, ph);
@@ -338,13 +318,13 @@ export class CleanCoverPreview {
     const ctx = this.displayCtx;
     if (!ctx || this.pw <= 0 || this.ph <= 0) return;
 
-    const { cols, rows, cellX, cellY, cellW, cellH, tileDelays } = this;
+    const { cellX, cellY, cellW, cellH, tileDelays } = this;
     let idx = 0;
 
-    for (let r = 0; r < rows; r++) {
+    for (let r = 0; r < TILE_ROWS; r++) {
       const y = cellY[r];
       const h = cellH[r];
-      for (let c = 0; c < cols; c++) {
+      for (let c = 0; c < TILE_COLUMNS; c++) {
         const t = clamp01((progress - tileDelays[idx++]) / TILE_FADE_FRACTION);
         const eased = t * t * (3 - 2 * t);
         const alpha = invert ? 1 - eased : eased;
@@ -365,7 +345,7 @@ export class CleanCoverPreview {
 
     if (this.animKind === "reveal") {
       ctx.clearRect(0, 0, this.pw, this.ph);
-      this.drawDissolve(this.toCanvas, easeScanWave(raw), false);
+      this.drawDissolve(this.toCanvas, easeDissolve(raw), false);
       this.hasCanvasPixels = true;
       return;
     }
@@ -374,7 +354,7 @@ export class CleanCoverPreview {
       ctx.clearRect(0, 0, this.pw, this.ph);
       ctx.globalAlpha = 1;
       ctx.drawImage(this.fromCanvas, 0, 0);
-      this.drawDissolve(this.toCanvas, easeScanWave(raw), false);
+      this.drawDissolve(this.toCanvas, easeDissolve(raw), false);
       this.hasCanvasPixels = true;
       return;
     }
@@ -482,7 +462,7 @@ export class CleanCoverPreview {
     this.displayedSrc = src;
     this.hasImage = true;
     this.renderImageToCanvas(this.toCtx, img);
-    this.rebuildGrid((this.gridSeed + 37) | 0);
+    this.shuffleTileDelays();
 
     const now = performance.now();
     this.animStart = now;
@@ -630,7 +610,7 @@ export class CleanCoverPreview {
       this.cancelRaf();
       this.animKind = "hide";
       this.animDuration = HIDE_DURATION_MS;
-      this.rebuildGrid((this.gridSeed + 37) | 0);
+      this.shuffleTileDelays();
       const now = performance.now();
       this.animStart = now;
       this.root.dataset.instant = "false";

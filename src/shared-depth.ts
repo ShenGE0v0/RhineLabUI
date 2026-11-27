@@ -1,77 +1,14 @@
 import * as THREE from 'three';
-import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { BokehPass, type BokehPassParameters } from 'three/addons/postprocessing/BokehPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
-/** Emit BokehPass's original packed HalfFloat depth alongside the AO normal.
- * A raw hardware depth texture has different precision; do not substitute it.
- * The local three revision uses _renderOverride as the normal-pass extension.
- */
-export class SharedDepthAO extends SSAOPass {
-  private packed: THREE.Texture;
-  private sharing = true;
-  private savedColor = new THREE.Color();
-  private depthClear = new Float32Array([1, 1, 1, 1]);
-  constructor(scene: THREE.Scene, camera: THREE.Camera, width: number, height: number, kernel = 32) {
-    super(scene, camera, width, height, kernel);
-    // PR #15: fullscreen AO targets never use a depth attachment.
-    this.ssaoRenderTarget.depthBuffer = false;
-    this.blurRenderTarget.depthBuffer = false;
-    this.packed = this.normalRenderTarget.texture.clone();
-    this.packed.name = 'Archive.packedDepth';
-    this.normalRenderTarget.textures.push(this.packed);
-    this.normalMaterial.onBeforeCompile = shader => {
-      if (!this.sharing) return;
-      shader.vertexShader = 'varying vec2 vArchiveZW;\n' + shader.vertexShader;
-      shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvArchiveZW = gl_Position.zw;');
-      shader.fragmentShader = 'varying vec2 vArchiveZW;\nlayout(location = 1) out vec4 archivePackedDepth;\n#include <packing>\n' + shader.fragmentShader;
-      shader.fragmentShader = shader.fragmentShader.replace('void main() {', 'void main() {\narchivePackedDepth = packDepthToRGBA(0.5 * vArchiveZW.x / vArchiveZW.y + 0.5);');
-    };
-    this.normalMaterial.customProgramCacheKey = () => `archive-normal-packed-depth-v1-${this.sharing}`;
-  }
-  render(renderer: THREE.WebGLRenderer, write: THREE.WebGLRenderTarget, read: THREE.WebGLRenderTarget, delta: number, mask: boolean) {
-    const hidden: THREE.Object3D[] = [];
-    this.scene.traverseVisible(object => { if (object.userData.excludeFromAO) hidden.push(object); });
-    for (const object of hidden) object.visible = false;
-    try { super.render(renderer, write, read, delta, mask); }
-    finally { for (const object of hidden) object.visible = true; }
-  }
-  setSharing(enabled: boolean) {
-    if (enabled === this.sharing) return;
-    this.normalRenderTarget.dispose();
-    this.sharing = enabled;
-    this.normalRenderTarget.textures.length = 1;
-    if (enabled) this.normalRenderTarget.textures.push(this.packed);
-    this.normalMaterial.needsUpdate = true;
-  }
-  _renderOverride(renderer: THREE.WebGLRenderer, material: THREE.Material, target: THREE.WebGLRenderTarget, color: THREE.ColorRepresentation, alpha: number) {
-    renderer.getClearColor(this.savedColor);
-    const savedAlpha = renderer.getClearAlpha(), autoClear = renderer.autoClear;
-    const override = this.scene.overrideMaterial;
-    renderer.setRenderTarget(target);
-    renderer.autoClear = false;
-    renderer.setClearColor(color, alpha);
-    renderer.clear();
-    // AO's normal clear remains unchanged; the packed depth background is white.
-    const gl = renderer.getContext() as WebGL2RenderingContext;
-    if (this.sharing) gl.clearBufferfv(gl.COLOR, 1, this.depthClear);
-    this.scene.overrideMaterial = material;
-    try { renderer.render(this.scene, this.camera); }
-    finally {
-      this.scene.overrideMaterial = override;
-      renderer.autoClear = autoClear;
-      renderer.setClearColor(this.savedColor, savedAlpha);
-    }
-  }
-}
-
+/** BokehPass patched to reuse the composer's hardware depth texture and exit early for in-focus pixels. */
 export class SharedDepthBokeh extends BokehPass {
   private width = 1;
   private height = 1;
-  private quad: FullScreenQuad;
   private hardwareDepthMaterial: THREE.ShaderMaterial;
   private hardwareDepthQuad: FullScreenQuad;
-  constructor(scene: THREE.Scene, camera: THREE.Camera, params: BokehPassParameters, private source: () => SharedDepthAO) {
+  constructor(scene: THREE.Scene, camera: THREE.Camera, params: BokehPassParameters) {
     super(scene, camera, params);
     const bokehTarget = "vec2 dofblur = vec2 ( clamp( factor * aperture, -maxblur, maxblur ) );";
     if (this.materialBokeh.fragmentShader.includes(bokehTarget)) {
@@ -81,7 +18,6 @@ export class SharedDepthBokeh extends BokehPass {
       );
       this.materialBokeh.needsUpdate = true;
     }
-    this.quad = new FullScreenQuad(this.materialBokeh);
     this.hardwareDepthMaterial = new THREE.ShaderMaterial({
       defines: { ...this.materialBokeh.defines, DEPTH_PACKING: 0 },
       uniforms: this.materialBokeh.uniforms,
@@ -96,22 +32,13 @@ export class SharedDepthBokeh extends BokehPass {
     this.height = Math.max(1, Math.floor(height));
   }
   render(renderer: THREE.WebGLRenderer, write: THREE.WebGLRenderTarget, read: THREE.WebGLRenderTarget, delta: number, mask: boolean) {
-    const ao = this.source(), uniforms = this.uniforms as Record<string, {value: any}>;
-    let depthTexture: THREE.Texture | null = null;
-    let quad: FullScreenQuad | null = null;
-    if (ao.enabled && Math.floor(ao.width) === this.width && Math.floor(ao.height) === this.height) {
-      depthTexture = ao.normalRenderTarget.textures[1];
-      quad = this.quad;
-    } else if (!ao.enabled && read.depthTexture && Math.floor(read.width) === this.width && Math.floor(read.height) === this.height) {
-      depthTexture = read.depthTexture;
-      quad = this.hardwareDepthQuad;
-    }
-    if (!depthTexture || !quad) {
-      // Lower resolution AO (or missing hardware depth) must retain the original full resolution depth pass.
+    if (!read.depthTexture || Math.floor(read.width) !== this.width || Math.floor(read.height) !== this.height) {
+      // Missing hardware depth (or size mismatch) falls back to the original Bokeh depth pass.
       return super.render(renderer, write, read, delta, mask);
     }
+    const uniforms = this.uniforms as Record<string, { value: any }>;
     const originalDepth = uniforms.tDepth.value;
-    uniforms.tDepth.value = depthTexture;
+    uniforms.tDepth.value = read.depthTexture;
     uniforms.tColor.value = read.texture;
     uniforms.nearClip.value = (this.camera as THREE.PerspectiveCamera).near;
     uniforms.farClip.value = (this.camera as THREE.PerspectiveCamera).far;
@@ -119,12 +46,11 @@ export class SharedDepthBokeh extends BokehPass {
     renderer.autoClear = false;
     renderer.setRenderTarget(this.renderToScreen ? null : write);
     if (!this.renderToScreen) renderer.clear();
-    try { quad.render(renderer); }
+    try { this.hardwareDepthQuad.render(renderer); }
     finally { uniforms.tDepth.value = originalDepth; renderer.autoClear = autoClear; }
   }
   dispose() {
     super.dispose();
-    this.quad.dispose();
     this.hardwareDepthQuad.dispose();
     this.hardwareDepthMaterial.dispose();
   }

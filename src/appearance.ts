@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { glassRevealGLSL, frostedTransmissionGLSL, FROSTED_ROUGHNESS } from "./glass-reveal.ts";
 import { internalOpticsFragment } from "./internal-optics.ts";
-import { REVEAL_ROLE, surfaceRole } from "./archive-surfaces";
+import { REVEAL_ROLE, surfaceRole } from "./archive-surfaces.ts";
 
 type Surface = THREE.MeshPhysicalMaterial;
 type Palette = { high: Surface; low?: Surface };

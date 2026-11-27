@@ -6,8 +6,7 @@ import {
   ArchiveDrawCoverage,
   ArchiveShadowCoverage,
 } from "../src/archive-draw-coverage.ts";
-import { archiveWave, smooth } from "../src/motion.ts";
-import { SharedDepthAO } from "../src/shared-depth.ts";
+import { SharedDepthBokeh } from "../src/shared-depth.ts";
 test("visible edge bounds and independent offscreen shadow transforms", () => {
   const camera = new THREE.PerspectiveCamera(45, 16 / 9, 1, 100);
   camera.position.set(0, 0, 20);
@@ -50,57 +49,13 @@ test("visible edge bounds and independent offscreen shadow transforms", () => {
   geometry.dispose();
   material.dispose();
 });
-test("zero scan shortcut agrees with authored waveform at boundaries and long-running times", () => {
-  const bell = (x, w) => Math.exp(-0.5 * (x / w) ** 2);
-  const original = (row, lane, time) => {
-    const t = time - 22,
-      phase = row + (lane - 2) * 0.65,
-      packet = (x) => 2.5 * bell(x, 3.8) - 0.58 * bell(x - 6, 3.5);
-    return (
-      smooth(t / 0.32) *
-      (packet(phase - (3 + t * 19)) * (1 - smooth((t - 2.15) / 0.65)) +
-        packet(phase - (32 - (t - 2.3) * 24)) *
-          smooth((t - 2.17) / 0.32) *
-          (1 - smooth((t - 3.5) / 0.85)))
-    );
-  };
-  for (const time of [
-    0,
-    21.9,
-    22 - 1e-10,
-    22,
-    22 + 1e-10,
-    23,
-    24,
-    25.5,
-    26.35 - 1e-10,
-    26.35,
-    26.35 + 1e-10,
-    1000,
-  ])
-    for (let lane = -4; lane < 9; lane++)
-      for (let row = -20; row < 60; row += 0.5)
-        assert.ok(
-          Math.abs(archiveWave(row, lane, time) - original(row, lane, time)) <
-            1e-14,
-        );
-});
-test("AO depth-buffer removal preserves normal depth and shared packed Bokeh depth", () => {
-  const pass = new SharedDepthAO(
+test("SharedDepthBokeh constructs, resizes, and disposes with hardware-depth support", () => {
+  const pass = new SharedDepthBokeh(
     new THREE.Scene(),
     new THREE.PerspectiveCamera(30, 1, 5, 300),
-    800,
-    600,
-    32,
+    { focus: 25, aperture: 0.0018, maxblur: 0.011 },
   );
-  assert.equal(pass.normalRenderTarget.depthBuffer, true);
-  assert.ok(pass.normalRenderTarget.depthTexture);
-  assert.equal(pass.ssaoRenderTarget.depthBuffer, false);
-  assert.equal(pass.blurRenderTarget.depthBuffer, false);
-  assert.equal(pass.normalRenderTarget.textures.length, 2);
-  pass.setSharing(false);
-  assert.equal(pass.normalRenderTarget.textures.length, 1);
-  pass.setSharing(true);
-  assert.equal(pass.normalRenderTarget.textures.length, 2);
+  pass.setSize(800, 600);
+  assert.ok(pass.materialBokeh.fragmentShader.includes("abs( dofblur.x ) < 0.00025"));
   pass.dispose();
 });

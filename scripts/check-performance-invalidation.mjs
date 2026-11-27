@@ -15,9 +15,10 @@ try{
   check('selection',()=>scene.select(7));
   await bench.prepare('static');
   check('late label texture',()=>{scene.labelTexture.needsUpdate=true;});
-  check('depth fallback',()=>scene.setQuality({...scene.quality,aoResolution:.5}));
-  check('disable AO',()=>scene.setQuality({...scene.quality,aoSamples:0}));
-  check('restore shared depth',()=>scene.setQuality({...scene.quality,aoSamples:32,aoResolution:1}));
+  await bench.prepare('detail');
+  check('disable DoF',()=>scene.setQuality({...scene.quality,depthOfField:0}));
+  check('restore DoF',()=>scene.setQuality({...scene.quality,depthOfField:100}));
+  await bench.prepare('static');
   check('AA',()=>scene.setQuality({...scene.quality,antialias:'smaa'}));
   await bench.prepare('static');
   // Capacity growth must retain one shared buffer and a valid picking sphere.

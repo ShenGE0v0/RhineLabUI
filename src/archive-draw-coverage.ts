@@ -46,7 +46,6 @@ export class ArchiveShadowCoverage {
     this.mesh.name = "archive-shadow-coverage";
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = true;
-    this.mesh.userData.excludeFromAO = true;
     this.mesh.userData.shadowOnly = true;
     // Three invokes separate onBeforeShadow/onBeforeRender hooks. Preserve full
     // shadow coverage, submit zero colour triangles, then restore the public count.

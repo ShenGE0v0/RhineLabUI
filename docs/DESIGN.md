@@ -6,12 +6,12 @@
 
 ## 1. 网页端形态定位
 
-项目以单一网页纯净画布形态（`.web-archive-clean`）运行（原 Wallpaper Engine 桌面壁纸端及桌面工作台已移除）：
+项目以单一网页画布形态运行（原 Wallpaper Engine 桌面壁纸端、桌面工作台、旧 2D HUD、系统设置面板及 360° 查看器均已移除）：
 
-| 维度 | 网页端（纯净画布 `.web-archive-clean`） |
+| 维度 | 网页端 |
 | --- | --- |
-| 2D HUD 与侧边栏 | 默认隐藏 `.brand`、`.system-nav`、`#archive-ui`、`#detail-ui`、`.powered`、`.system-footer`、`#inspection-marks` 及归档态更新提示，仅在右上角保留非交互的 `.clean-archive-title` 与正下方的 `.clean-archive-cover` 封面预览窗（两者均在入场过场期间隐藏；待入场选档就绪或被打断后，`.clean-archive-title` 以 32 桶内联 SVG `<mask>` 像素方格波浪溶解显现，`.clean-archive-cover` 以高分 `<canvas>` 离屏快照 `3×2` 分块交错渐变波浪同步溶解显现并在总览右对齐显示当前悬停或选中档案的 16:10 封面；单次切档/悬停与 `rhine.setCardPhoto()` 零延迟分块溶解切换，高速连续划过或滚轮连扫自动合并中间卡片（`85 ms` 消抖 / `220 ms` 最大等待）并从当前实时画布快照平滑溶解至最新目标以消除连续切换鬼畜；数据集重载/布局刷新立即同步，进入 `detail` 详情态时经 `3×2` 分块溶解退出或无可用封面时自动隐藏，保留 `.clean-archive-title` 回退显示当前选中档案标题） |
-| 详情推进方式 | 启用 `fixedDetailCamera`，恒定 `6.556°` 长焦球面双弹簧推进，背景维持总览阵列表现 |
+| 2D HUD 与侧边栏 | 旧 2D HUD（`.brand`、`.system-nav`、`#archive-ui`、`#detail-ui`、`.powered`、`.system-footer`、`#inspection-marks`、系统设置面板、360° 模型查看器及其滚轮数字/时钟与解密辅助模块）已彻底移除，仅保留 `#three-scene`、`.archive-atmosphere`、右上角非交互的 `.clean-archive-title` 与正下方的 `.clean-archive-cover` 封面预览窗、无障碍播报 `#clean-title-live`、`#pwa-update-notice`（归档态隐藏）、`#modal-root`、`#toast` 与 `#loading`（`.clean-archive-title` 与 `.clean-archive-cover` 均在入场过场期间隐藏；待入场选档就绪或被打断后，`.clean-archive-title` 以 32 桶内联 SVG `<mask>` 像素方格波浪溶解显现，`.clean-archive-cover` 以高分 `<canvas>` 离屏快照 `3×2` 随机错峰溶解同步显现并在总览右对齐显示当前悬停或选中档案的 16:10 封面；单次切档/悬停与 `rhine.setCardPhoto()` 零延迟分块溶解切换，高速连续划过或滚轮连扫自动合并中间卡片（`85 ms` 消抖 / `220 ms` 最大等待）并从当前实时画布快照平滑溶解至最新目标以消除连续切换鬼畜；数据集重载/布局刷新立即同步，进入 `detail` 详情态时经 `3×2` 随机分块溶解退出或无可用封面时自动隐藏，保留 `.clean-archive-title` 回退显示当前选中档案标题） |
+| 详情推进方式 | 恒定 `6.556°` 长焦球面双弹簧推进（共用总览暖色布光与硬件深度景深，不启用 SSAO），背景维持总览阵列表现 |
 | 快捷键 | 方向键、滚轮、拖拽、`Enter`/双击打开详情、`Esc` 返回、`/` 检索、手柄 `Home` 收藏弹窗 |
 
 ---
@@ -48,7 +48,7 @@
 
 - **唯一主题**：**亮色暖焦糖调**（背景与雾 `OVERVIEW_MIST = #f3eee8`、`WARM` 色板），全站固定同一套色彩，不提供配色切换入口。
 - **亮色实景四灯系统**（`src/scene.ts`）：
-  - 主聚光灯：`#ffead6`，位置从总览 `(-23, 21, 5)` / 强度 `205` 过渡至详情 `(-21, 20, 14)` / 强度 `290`（网页纯净模式启用 `fixedDetailCamera` 时维持总览灯光），启用软阴影（`PCFShadowMap`、`shadow.radius = 4`）。
+  - 主聚光灯：`#ffead6`，恒定位于 `(-23, 21, 5)`、强度 `205`，启用软阴影（`PCFShadowMap`、`shadow.radius = 4`）。
   - 天空半球补光（`#fff3e8` / `#b88b68`）与右前掠射补光（`#ffead8`）。
   - 底部长条面光（`RectAreaLight`，`#ffba60`，`36 × 0.29`，`y = -3.35`，`zOffset = 0.12`，强度 `30`）与地面发光条共用连续滑行坐标。
 - **长条底光透射联动**（`src/archive-slot-underlight.ts`）：
@@ -60,7 +60,7 @@
 
 ## 5. 详情推进镜头
 
-网页纯净模式下启用 `fixedDetailCamera`（`src/scene.ts`）：
+详情推进采用恒定长焦球面双弹簧镜头（`src/scene.ts`）：
 - **恒定长焦**：标准 `16:9` 横屏下保持总览 `fov ≈ 6.556°` 不变（其他视口比例锁定进入详情瞬间的当前 `fov`，通过求解推进距离使画面构图放大），同时将 `projectionScaleX / Y` 从总览 `0.97 / 1.02` 平滑还原为 `1.0 / 1.0` 消除透视畸变。
 - **目标构图**：略偏右侧的 3/4 正面构图（`DETAIL_TARGET_AZIMUTH = 28°`、`DETAIL_TARGET_ELEVATION = 11°`、`DETAIL_FRAME_CENTER_X = 0.42`、`DETAIL_FRAME_CENTER_Y = 0.47`、`DETAIL_FRAME_HEIGHT = 0.72`）。
 - **双通道球面弹簧**：
