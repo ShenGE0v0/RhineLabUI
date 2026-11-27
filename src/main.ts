@@ -497,6 +497,7 @@ function fit() {
     viewer?.resize();
   }
   cleanTitle.resize();
+  cleanCover.resize();
   updateQualitySummary();
 }
 window.addEventListener("resize", fit);
@@ -562,10 +563,7 @@ function setMode(next: Mode) {
   audio.setScene(next);
   $("#stage").dataset.mode = next;
   if (previousMode !== next) fit();
-  syncCleanCover(motionActive("surfaceTransitions") && next === "archive");
-  if (next !== "archive" && !motionActive("surfaceTransitions")) {
-    cleanCover.finish();
-  }
+  syncCleanCover(motionActive("surfaceTransitions"));
   $("#archive-ui").inert = next !== "archive" || Boolean(modal);
   $("#archive-ui").setAttribute("aria-hidden", String(next !== "archive"));
   $(".system-nav").inert = Boolean(modal);

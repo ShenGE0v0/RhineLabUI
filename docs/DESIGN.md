@@ -10,7 +10,7 @@
 
 | 维度 | 网页端（纯净画布 `.web-archive-clean`） |
 | --- | --- |
-| 2D HUD 与侧边栏 | 默认隐藏 `.brand`、`.system-nav`、`#archive-ui`、`#detail-ui`、`.powered`、`.system-footer`、`#inspection-marks` 及归档态更新提示，仅在右上角保留非交互的 `.clean-archive-title` 与正下方的 `.clean-archive-cover` 封面预览窗（两者均在入场过场期间隐藏；待入场选档就绪或被打断后，`.clean-archive-title` 以从左到右波浪散点细方格同步交叉溶解显现，`.clean-archive-cover` 同步淡入并于总览态右对齐显示当前悬停或选中档案的 16:10 封面；总览悬停、`select` 与 `rhine.setCardPhoto()` 触发双层交叉淡入切换，数据集重载/布局刷新立即同步，进入 `detail` 详情态或无可用封面时自动隐藏，保留 `.clean-archive-title` 回退显示当前选中档案标题） |
+| 2D HUD 与侧边栏 | 默认隐藏 `.brand`、`.system-nav`、`#archive-ui`、`#detail-ui`、`.powered`、`.system-footer`、`#inspection-marks` 及归档态更新提示，仅在右上角保留非交互的 `.clean-archive-title` 与正下方的 `.clean-archive-cover` 封面预览窗（两者均在入场过场期间隐藏；待入场选档就绪或被打断后，`.clean-archive-title` 以 32 桶内联 SVG `<mask>` 像素方格波浪溶解显现，`.clean-archive-cover` 以高分 `<canvas>` 离屏快照 `3×2` 分块交错渐变波浪同步溶解显现并在总览右对齐显示当前悬停或选中档案的 16:10 封面；单次切档/悬停与 `rhine.setCardPhoto()` 零延迟分块溶解切换，高速连续划过或滚轮连扫自动合并中间卡片（`85 ms` 消抖 / `220 ms` 最大等待）并从当前实时画布快照平滑溶解至最新目标以消除连续切换鬼畜；数据集重载/布局刷新立即同步，进入 `detail` 详情态时经 `3×2` 分块溶解退出或无可用封面时自动隐藏，保留 `.clean-archive-title` 回退显示当前选中档案标题） |
 | 详情推进方式 | 启用 `fixedDetailCamera`，恒定 `6.556°` 长焦球面双弹簧推进，背景维持总览阵列表现 |
 | 快捷键 | 方向键、滚轮、拖拽、`Enter`/双击打开详情、`Esc` 返回、`/` 检索、手柄 `Home` 收藏弹窗 |
 
