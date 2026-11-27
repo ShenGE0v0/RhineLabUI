@@ -1,4 +1,5 @@
 import content from "../content/archives.json" with { type: "json" };
+import type { ModelVotePayload } from "./model-votes-data.ts";
 
 export interface ArchiveCardStats {
   sample?: string;
@@ -50,6 +51,7 @@ export interface ArchiveDatasetInput {
   categories?: string[];
   coverResolver?: ArchiveCoverResolver | null;
   bookmarkScope?: string;
+  modelVotes?: ModelVotePayload;
 }
 
 export interface ArchiveDataAdapter {

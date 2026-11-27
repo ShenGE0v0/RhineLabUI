@@ -33,8 +33,16 @@ import {
 import {
   createFetchAdapter,
   resolveBootstrapDataset,
+  resolveBootstrapModelVotes,
+  type ArchiveDataPayload,
   type FetchAdapterOptions,
 } from "./data-source";
+import {
+  getModelVotes,
+  setModelVotes,
+  subscribeModelVotes,
+} from "./model-votes-data";
+import { ModelVotesPanel } from "./model-votes-panel";
 import {
   modelProvider,
   modelProviderAssetPath,
@@ -64,6 +72,7 @@ $("#stage").innerHTML = `
   <div class="archive-atmosphere"></div>
   <div id="clean-archive-title" class="clean-archive-title" aria-hidden="true"></div>
   <div id="clean-archive-cover" class="clean-archive-cover" aria-hidden="true" data-visible="false"></div>
+  <aside id="model-votes-panel" class="model-votes" aria-label="模型票数排行" data-phase="hidden"></aside>
   <div id="clean-title-live" class="clean-title-live" aria-live="polite" aria-atomic="true"></div>
   <div id="pwa-update-notice" class="pwa-update-notice" role="status" hidden><span>新版本已就绪</span><button data-pwa-action="update">更新并重启 ↻</button></div>
   <div id="modal-root"></div><div id="toast" class="toast" role="status"></div>
@@ -197,12 +206,29 @@ function syncCleanTitle(
     provider: modelProvider(record?.en ?? ""),
     animated,
   };
+  if (mode !== "archive") {
+    if (announce && cleanTitleLive.textContent !== next.title) {
+      cleanTitleLive.textContent = next.title;
+    }
+    return;
+  }
   cleanTitle.update(next);
   if (announce && cleanTitleLive.textContent !== next.title) {
     cleanTitleLive.textContent = next.title;
   }
 }
 const cleanCover = new CleanCoverPreview($("#clean-archive-cover"));
+const modelVotesPanel = new ModelVotesPanel({
+  root: $("#model-votes-panel"),
+  resolveProviderUrl: (provider) => assetUrl(modelProviderAssetPath(provider)),
+  entries: getModelVotes(),
+});
+const stopModelVotesSync = subscribeModelVotes((entries) => {
+  modelVotesPanel.setEntries(entries);
+  window.dispatchEvent(
+    new CustomEvent("rhine:model-votes-change", { detail: entries }),
+  );
+});
 const cardPhotoOverrides = new Map<number, string | null>();
 function sanitizeManualCover(src: unknown): string | null {
   if (typeof src !== "string") return null;
@@ -291,7 +317,9 @@ function savePrefs() {
     cleanTitle.finish();
   }
   if (!motionActive("surfaceTransitions")) {
+    cleanTitle.finish();
     cleanCover.finish();
+    modelVotesPanel.finish();
     modalTransition?.finish();
   }
   scene?.setMotion(prefs.motion);
@@ -344,6 +372,7 @@ function fit() {
   }
   cleanTitle.resize();
   cleanCover.resize();
+  modelVotesPanel.resize();
 }
 window.addEventListener("resize", fit);
 // Any real input wakes the idle-settled array immediately, so the breathing
@@ -373,12 +402,21 @@ function setMode(next: Mode) {
   audio.setScene(next);
   $("#stage").dataset.mode = next;
   if (previousMode !== next) fit();
+  if (next === "archive" && previousMode !== "archive") {
+    cleanTitle.finish();
+    syncCleanTitle(false);
+  }
   syncCleanCover(motionActive("surfaceTransitions"));
   if (previousMode === "detail" && next !== "detail") {
     pendingDetailFocus = false;
     if (!modal && next === "archive") focusArchiveOverview();
   }
   scene?.setMode(next);
+  if (started) {
+    const surfaceMotion = motionActive("surfaceTransitions");
+    cleanTitle.setArchiveVisible(next === "archive", surfaceMotion);
+    modelVotesPanel.setArchiveVisible(next === "archive", surfaceMotion);
+  }
   if (next === "detail" && previousMode !== "detail") {
     pendingDetailFocus = true;
   }
@@ -442,6 +480,7 @@ function openModal(kind: NonNullable<typeof modal>) {
   }
   modalClosing = false;
   modal = kind;
+  modelVotesPanel.setPaused(true);
   searchQuery = "";
   filter = categories[0] ?? "全部作品";
   renderModal();
@@ -460,6 +499,7 @@ function closeModal(afterClose?: () => void) {
     modalTransition = undefined;
     modalSiblings.forEach(({ node, inert }) => (node.inert = inert));
     modalSiblings = [];
+    modelVotesPanel.setPaused(false);
     previousFocus?.focus({ preventScroll: true });
     afterClose?.();
   });
@@ -718,8 +758,15 @@ function bindScene(scene: ArchiveScene) {
   };
   scene.onIntroChange = (active) => {
     if (!started) return;
-    syncCleanTitle(!active && motionActive("rollingText") && mode === "archive");
+    syncCleanTitle(!active && motionActive("surfaceTransitions") && mode === "archive");
     syncCleanCover(!active && motionActive("surfaceTransitions") && mode === "archive");
+    if (mode === "archive") {
+      if (active) {
+        modelVotesPanel.startIntro(motionActive("surfaceTransitions"));
+      } else {
+        modelVotesPanel.interruptIntro();
+      }
+    }
   };
 }
 
@@ -813,6 +860,18 @@ function syncArchiveData(event: ArchiveDataChangeEvent) {
   );
 }
 
+function applyDatasetPayload(payload: ArchiveDataPayload) {
+  const snapshot = setArchiveDataset(payload);
+  if (payload && !Array.isArray(payload) && payload.modelVotes) {
+    try {
+      setModelVotes(payload.modelVotes);
+    } catch (error) {
+      console.warn("[model-votes] 外部模型票数数据无效，保持当前榜单。", error);
+    }
+  }
+  return snapshot;
+}
+
 async function loadExternalDataset(url: string, options?: FetchAdapterOptions) {
   const adapter = createFetchAdapter(url, options);
   bootstrapRequest?.abort();
@@ -823,7 +882,7 @@ async function loadExternalDataset(url: string, options?: FetchAdapterOptions) {
     const payload = await adapter.load(request.signal);
     if (request.signal.aborted) throw request.signal.reason;
     datasetRequest = undefined;
-    return setArchiveDataset(payload);
+    return applyDatasetPayload(payload);
   } finally {
     if (datasetRequest === request) datasetRequest = undefined;
   }
@@ -834,8 +893,9 @@ async function start() {
     const request = new AbortController();
     bootstrapRequest = request;
     const bootstrapPromise = resolveBootstrapDataset(reviewParams, request.signal);
+    const bootstrapVotesPromise = resolveBootstrapModelVotes(request.signal);
     scene = new ArchiveScene($("#three-scene"));
-    const [, bootstrapDataset] = await Promise.all([
+    const [, bootstrapDataset, , bootstrapModelVotes] = await Promise.all([
       scene.load(),
       bootstrapPromise,
       // With unicode-range faces, preload the brand characters, not every
@@ -844,6 +904,7 @@ async function start() {
         "600 20px MiSans",
         "AI DEMO ARCHIVE ANALYSIS OS",
       ),
+      bootstrapVotesPromise,
     ]);
     bootstrapRequest = undefined;
     if (bootstrapDataset && !request.signal.aborted) {
@@ -853,6 +914,19 @@ async function start() {
         console.warn("[archive] 外部启动数据集注入失败，保持内置演示数据。", error);
       }
     }
+    const pendingVotes =
+      bootstrapModelVotes ??
+      (bootstrapDataset && !Array.isArray(bootstrapDataset)
+        ? bootstrapDataset.modelVotes
+        : undefined);
+    if (pendingVotes && !request.signal.aborted) {
+      try {
+        setModelVotes(pendingVotes);
+      } catch (error) {
+        console.warn("[model-votes] 启动模型票数注入失败，保持内置演示数据。", error);
+      }
+    }
+    modelVotesPanel.preloadIcons();
     await document.fonts.load(
       "700 28px MiSans",
       `DEEPDEMOS ${records[selected]?.title ?? ""}`,
@@ -885,6 +959,9 @@ function completeStartup(musicDisabled: boolean) {
   // Place the grid in frame immediately and play the 4-stage overview entrance.
   scene?.revealImmediately();
   if (reviewParams.get("scene") !== "detail") scene?.playIntro();
+  if (mode === "archive" && !scene?.isIntroActive) {
+    modelVotesPanel.startIntro(false);
+  }
   syncCleanTitle(false);
   syncCleanCover(false);
   $("#stage").inert = false;
@@ -942,11 +1019,14 @@ const rhine = {
       } | null,
       index?: number,
     ) => scene?.setCardStats(stats, index),
-    setData: setArchiveDataset,
+    setData: applyDatasetPayload,
     loadData: loadExternalDataset,
     updateRecord: updateArchiveRecord,
     setCoverResolver,
     getData: getArchiveDatasetSnapshot,
+    setModelVotes,
+    getModelVotes,
+    setModelVotesOpen: (open: boolean) => modelVotesPanel.setOpen(Boolean(open)),
     stats: () => ({
       ...scene?.getStats(),
       fps: Math.round(fps),
@@ -956,6 +1036,7 @@ const rhine = {
       motion: { reduced: motionIsReduced(), preset: prefs.motionPreset },
       selected: records[selected]?.id ?? "",
       saved: [...saved],
+      modelVotes: modelVotesPanel.stats(),
       audio: audio.stats(),
     }),
 };
@@ -968,9 +1049,11 @@ window.rhine = rhine;
 if (import.meta.hot)
   import.meta.hot.dispose(() => {
     stopDataSync();
+    stopModelVotesSync();
     bootstrapRequest?.abort();
     datasetRequest?.abort();
     cleanTitle.finish();
     cleanCover.dispose();
+    modelVotesPanel.dispose();
     audio.dispose();
   });

@@ -15,11 +15,26 @@
 }
 :is([data-layout="compact"], [data-layout="portrait"]) .clean-archive-title { top: var(--top-edge); right: var(--edge); font-size: 18px; }
 :is([data-layout="compact"], [data-layout="portrait"]) .clean-archive-cover { top: calc(var(--top-edge) + 30px); right: var(--edge); width: clamp(132px, 24vw, 184px); border-radius: 3px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-votes { --stack-step: 29px; --flyer-size: 24px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-vote-provider-img { width: 21px; height: 21px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-vote-monogram { font-size: 14px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-votes-bar-meta { font-size: 13.5px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-votes-bar-count { font-size: 12px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-votes-chevron { font-size: 11px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-vote-name { font-size: 12.5px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-vote-count { font-size: 12px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-vote-score { font-size: 11px; }
+[data-layout="compact"] .clean-archive-title { max-width: calc(100% - 2 * var(--edge) - 278px); }
+[data-layout="compact"] .model-votes { top: var(--top-edge); left: var(--edge); width: fit-content; max-width: calc(100% - 2 * var(--edge) - 200px); }
+[data-layout="compact"] .model-votes-grid { width: 244px; gap: 10px; padding-top: 10px; }
 :is([data-layout="compact"], [data-layout="portrait"]) .key { display: none; }
 
 /* Portrait keeps the specimen above an independently scrollable document. */
 [data-layout="portrait"] .clean-archive-title { font-size: clamp(11px, 3.85vw, 15px); }
 [data-layout="portrait"] .clean-archive-cover { top: calc(var(--top-edge) + 26px); width: min(148px, 38vw); }
+[data-layout="portrait"] .model-votes { top: auto; bottom: var(--bottom-edge, 12px); left: var(--edge); width: fit-content; max-width: calc(100% - 2 * var(--edge)); }
+[data-layout="portrait"] .model-votes-layout { flex-direction: column-reverse; }
+[data-layout="portrait"] .model-votes-grid { width: min(252px, calc(100vw - 2 * var(--edge))); padding: 0 0 8px; gap: 9px; }
 [data-layout="portrait"] .archive-atmosphere::before { background: linear-gradient(180deg, rgb(var(--archive-mist-rgb)), transparent 29%, transparent 46%, rgba(var(--archive-mist-rgb), .8) 65%, rgb(var(--archive-mist-rgb)) 82%); }
 
 /* Dialogs remain inside the visual viewport when a software keyboard opens. */
@@ -44,6 +59,15 @@
 :is([data-layout="compact"], [data-layout="portrait"]) .modal-bottom { position: static; margin-top: 22px; gap: 12px; font-size: 8px; flex-wrap: wrap; }
 :is([data-layout="compact"], [data-layout="portrait"]) .toast { max-width: calc(100% - 40px); width: max-content; font-size: 13px; bottom: 52px; }
 
+@media (max-height: 460px) {
+  [data-layout="compact"] .model-votes { --stack-step: 25px; --flyer-size: 20px; }
+  [data-layout="compact"] .model-votes-bar { min-height: 28px; }
+  [data-layout="compact"] .model-vote-provider-img { width: 18px; height: 18px; }
+  [data-layout="compact"] .model-votes-grid { gap: 6px; padding-top: 6px; }
+  [data-layout="compact"] .model-vote-name { font-size: 11.5px; }
+  [data-layout="compact"] :is(.model-vote-score, .model-vote-count) { font-size: 10.5px; }
+}
+
 @media (max-width: 370px) {
   #stage[data-layout="portrait"] { --edge: max(14px, env(safe-area-inset-left), env(safe-area-inset-right)); }
   /* Narrow screens keep their 12px side insets, minus the top one now owned
@@ -51,4 +75,12 @@
   [data-layout="portrait"] .terminal-modal { padding: 0 12px 12px; }
   [data-layout="portrait"] .modal-top { padding-top: 12px; }
   [data-layout="portrait"] :is(.result-header, .result-row) { grid-template-columns: minmax(0, 1fr) 68px; }
+  [data-layout="portrait"] .model-votes { --stack-step: 25px; --flyer-size: 21px; }
+  [data-layout="portrait"] .model-vote-provider-img { width: 19px; height: 19px; }
+  [data-layout="portrait"] .model-votes-bar { gap: 8px; }
+  [data-layout="portrait"] .model-votes-bar-meta { font-size: 12px; }
+  [data-layout="portrait"] .model-votes-grid { width: min(236px, calc(100vw - 2 * var(--edge))); gap: 8px; }
+  [data-layout="portrait"] .model-vote-item { gap: 6px; }
+  [data-layout="portrait"] .model-vote-name { font-size: 11.5px; }
+  [data-layout="portrait"] :is(.model-vote-score, .model-vote-count) { font-size: 10.5px; }
 }

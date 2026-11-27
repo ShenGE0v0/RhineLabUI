@@ -5,6 +5,11 @@ import {
   type ArchiveDatasetInput,
   type ArchiveRecordInput,
 } from "./data.ts";
+import {
+  normalizeModelVotes,
+  type ModelVoteBootstrapSource,
+  type ModelVotePayload,
+} from "./model-votes-data.ts";
 
 export type ArchiveDataPayload = ArchiveDatasetInput | ArchiveRecordInput[];
 
@@ -30,6 +35,8 @@ declare global {
   interface Window {
     __DEEPDEMOS_DATA__?: ArchiveBootstrapSource;
     __RHINE_DATA__?: ArchiveBootstrapSource;
+    __DEEPDEMOS_MODEL_VOTES__?: ModelVoteBootstrapSource;
+    __RHINE_MODEL_VOTES__?: ModelVoteBootstrapSource;
   }
 }
 
@@ -172,6 +179,49 @@ export async function resolveBootstrapDataset(
     return payload;
   } catch (error) {
     if (!signal?.aborted) console.warn("[archive] 启动数据源不可用，使用内置演示数据。", error);
+    return null;
+  }
+}
+
+function isModelVoteAdapter(value: unknown): value is {
+  load: (signal?: AbortSignal) => ModelVotePayload | Promise<ModelVotePayload>;
+} {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "load" in value &&
+      typeof (value as { load?: unknown }).load === "function",
+  );
+}
+
+export async function resolveBootstrapModelVotes(
+  signal?: AbortSignal,
+): Promise<ModelVotePayload | null> {
+  try {
+    const globalSource =
+      typeof window === "undefined"
+        ? undefined
+        : (window.__DEEPDEMOS_MODEL_VOTES__ ?? window.__RHINE_MODEL_VOTES__);
+    if (globalSource === undefined || globalSource === null) return null;
+    const payload = await loadWithDeadline(
+      (requestSignal) => {
+        if (typeof globalSource === "function") return globalSource();
+        if (isModelVoteAdapter(globalSource))
+          return globalSource.load(requestSignal);
+        return globalSource;
+      },
+      BOOTSTRAP_DATA_TIMEOUT_MS,
+      signal,
+    );
+    normalizeModelVotes(payload);
+    return payload;
+  } catch (error) {
+    if (!signal?.aborted) {
+      console.warn(
+        "[model-votes] 启动模型票数数据源不可用，使用内置演示数据。",
+        error,
+      );
+    }
     return null;
   }
 }

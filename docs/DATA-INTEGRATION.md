@@ -37,7 +37,7 @@
 
 | 方法 | 说明 |
 | --- | --- |
-| `rhine.setData(input)` | 用 `ArchiveRecordInput[]` 或 `{ records, columns?, categories?, coverResolver?, bookmarkScope? }` 全量替换数据集，并重绘三维阵列。 |
+| `rhine.setData(input)` | 用 `ArchiveRecordInput[]` 或 `{ records, columns?, categories?, coverResolver?, bookmarkScope?, modelVotes? }` 全量替换数据集，并重绘三维阵列（可选同步更新榜单）。 |
 | `rhine.loadData(url, options?)` | 拉取 JSON 并替换数据集。选项包括 `headers`、`credentials`、`timeoutMs`、`transform(raw)`、`coverResolver` 和 `bookmarkScope`。新请求或直接替换会取消上一条请求，被取消的请求以 `AbortError` 结束。 |
 | `rhine.updateRecord(idOrIndex, patch)` | 按档案 `id` 或数组下标增量更新单条记录（如实时更新 `title`、`stats`、`cover`）；若 `category` 变更则自动重建列索引，否则仅精准刷新对应卡面纹理与标题。 |
 | `rhine.setCoverResolver(fn \| null)` | 注册全局封面路径改写钩子 `(cover, record, index) => string \| null`，用于统一拼接 CDN 域名、签名或同源代理路径。 |
@@ -96,3 +96,28 @@ await window.rhine.loadData("/api/works", {
 | `source` | 否 | 原页链接，仅允许 `http:` / `https:`，非法协议自动置空 |
 | `cover` | 否 | 封面路径（`public/` 下同源相对路径如 `assets/covers/...`、源站根路径如 `/api/cover-proxy?url=...`、`data:image/*`、`blob:` 或支持 CORS 的 `http(s):` URL） |
 | `stats` | 否 | `{ sample?: string, downloads?: number, comments?: number }` |
+
+---
+
+## 3. 左上角模型票数面板接口（`modelVotes`）
+
+左上角 `#model-votes-panel` 在内置数据阶段预填代表性演示榜单，支持通过以下接口随时替换为真实业务数据（最多展示前 6 项）：
+
+- **启动预注入**：支持独立的 `window.__DEEPDEMOS_MODEL_VOTES__`（别名 `window.__RHINE_MODEL_VOTES__`，支持数组、`{ items: [...] }`、`Promise`、工厂函数或 `{ load(signal?) }` 适配器），也可在 `window.__DEEPDEMOS_DATA__.modelVotes` / `rhine.setData({ records, modelVotes })` / `rhine.loadData(...)` 中一并传入。
+- **运行时接口**：
+  - `rhine.setModelVotes(listOrNull)`：传入 `ModelVoteInput[]` 或 `{ items: ModelVoteInput[] }` 实时更新榜单；传 `null` 恢复内置演示榜单。
+  - `rhine.getModelVotes()`：获取当前规范化榜单只读副本。
+  - `rhine.setModelVotesOpen(open)`：手动展开（`true`）或折叠（`false`）面板。
+  - 变更事件：每次更新向 `window` 派发 `rhine:model-votes-change`（`event.detail` 为最新数组）。
+
+| `ModelVoteInput` 字段 | 必填 | 默认值 / 说明 |
+| --- | --- | --- |
+| `name` | 是 | 模型名称，如 `"DS-FV-0831"` |
+| `votes` | 是 | 票数（非负有限数字，取整后显示为 `63 票`） |
+| `provider` | 否 | 厂商图标 key（`deepseek`、`anthropic` 等）；不传时根据 `name` 自动匹配，显式传 `null` 强制显示首字母徽标 |
+| `providerLabel` | 否 | 厂商名称，缺省根据 `provider` 映射，未匹配时回退 `"未标厂商"`（保留在 `ModelVoteEntry` / `getModelVotes()` 中，当前无底紧凑榜单仅直接渲染图标、模型名与右侧票数／评分） |
+| `works` | 否 | 关联作品数（非负有限数字，取整保留在 `ModelVoteEntry` / `getModelVotes()` 中供宿主读取，当前榜单视图不显示副标题行） |
+| `score` | 否 | 评分（`0–10` 有限数字，保留 2 位小数展示为 `4.82`） |
+| `id` | 否 | 唯一标识，缺省根据 `name` 自动生成 |
+
+另可通过 `rhine.stats().modelVotes` 读取面板当前运行状态 `{ phase, expanded, count }`。

@@ -1,16 +1,23 @@
+import {
+  MIST_SVG_NS,
+  MIST_HIDE_DURATION_MS,
+  MIST_RETURN_DURATION_MS,
+  MIST_SWITCH_DURATION_MS,
+  type EtchMaskHandle,
+  applyMistEtchDissolve,
+  bindEtchMask,
+  clamp01,
+  clearMistEtchStyles,
+  createEtchMask,
+  easeMistReveal,
+  easeOutQuad,
+} from "./mist-etch-dissolve";
+
 export interface CleanCoverUpdate {
   src: string | null;
   visible: boolean;
   animated: boolean;
 }
-
-const TILE_COLUMNS = 3;
-const TILE_ROWS = 2;
-const TILE_FADE_FRACTION = 0.4;
-
-const REVEAL_DURATION_MS = 420;
-const MORPH_DURATION_MS = 380;
-const HIDE_DURATION_MS = 480;
 
 const SWEEP_DEBOUNCE_MS = 85;
 const SWEEP_MAX_WAIT_MS = 220;
@@ -19,20 +26,9 @@ const BURST_WINDOW_MS = 140;
 const MAX_IMAGE_CACHE = 16;
 const MAX_CANVAS_DIM = 1024;
 
+let coverMaskCounter = 0;
+
 type AnimKind = "none" | "reveal" | "morph" | "hide";
-
-function clamp01(value: number): number {
-  return value <= 0 ? 0 : value >= 1 ? 1 : value;
-}
-
-function easeOutQuad(t: number): number {
-  const inv = 1 - t;
-  return 1 - inv * inv;
-}
-
-function easeDissolve(t: number): number {
-  return 0.45 * t + 0.55 * Math.sin(t * Math.PI * 0.5);
-}
 
 function measureCanvasBox(el: HTMLElement): {
   cssW: number;
@@ -68,23 +64,27 @@ function measureCanvasBox(el: HTMLElement): {
 }
 
 /**
- * Renders the clean-mode top-right archive cover preview with a HiDPI
- * offscreen-composited `<canvas>` randomized tile dissolve and burst
- * coalescing. Any interruption captures the live visible frame into
- * `fromCanvas` so rapid multi-card sweeps never flash, snap back, or strobe.
+ * Renders the clean-mode top-right archive cover preview with shared
+ * micro-etch + optical mist dissolves across initial reveal, card-to-card
+ * dual-frame cross-dissolve (`morph`), and detail hide, plus burst coalescing.
  */
 export class CleanCoverPreview {
   private readonly root: HTMLElement;
-  private readonly frame: HTMLDivElement;
+  private readonly shell: HTMLDivElement;
+  private readonly outFrame: HTMLDivElement;
+  private readonly inFrame: HTMLDivElement;
+  private readonly shellMistMask: EtchMaskHandle;
+  private readonly outMistMask: EtchMaskHandle;
+  private readonly inMistMask: EtchMaskHandle;
+  private readonly outCanvas: HTMLCanvasElement;
+  private readonly outCtx: CanvasRenderingContext2D | null;
   private readonly displayCanvas: HTMLCanvasElement;
   private readonly displayCtx: CanvasRenderingContext2D | null;
-  private readonly fromCanvas: HTMLCanvasElement;
-  private readonly fromCtx: CanvasRenderingContext2D | null;
-  private readonly toCanvas: HTMLCanvasElement;
-  private readonly toCtx: CanvasRenderingContext2D | null;
 
   private readonly imageCache = new Map<string, HTMLImageElement>();
   private activeImg: HTMLImageElement | null = null;
+  private outImg: HTMLImageElement | null = null;
+  private outSrc: string | null = null;
   private activeLoader: HTMLImageElement | null = null;
 
   private pw = 0;
@@ -92,15 +92,17 @@ export class CleanCoverPreview {
   private cssW = 0;
   private radiusPx = 4;
 
-  private cellX = new Int32Array(0);
-  private cellY = new Int32Array(0);
-  private cellW = new Int32Array(0);
-  private cellH = new Int32Array(0);
-  private tileDelays = new Float32Array(0);
-
   private animKind: AnimKind = "none";
   private animStart = 0;
-  private animDuration = MORPH_DURATION_MS;
+  private animDuration = MIST_SWITCH_DURATION_MS;
+  private outActive = false;
+  private outStart = 0;
+  private outDuration = Math.round(MIST_SWITCH_DURATION_MS * 0.62);
+  private inStart = 0;
+  private inDelay = Math.round(MIST_SWITCH_DURATION_MS * 0.14);
+  private inDuration =
+    MIST_SWITCH_DURATION_MS - Math.round(MIST_SWITCH_DURATION_MS * 0.14);
+  private hasOutPixels = false;
   private rafId = 0;
 
   private loadToken = 0;
@@ -121,28 +123,74 @@ export class CleanCoverPreview {
   constructor(root: HTMLElement) {
     this.root = root;
 
-    const frame = document.createElement("div");
-    frame.className = "clean-cover-frame";
-    this.frame = frame;
+    const uid = ++coverMaskCounter;
+    const svg = document.createElementNS(MIST_SVG_NS, "svg");
+    svg.setAttribute("class", "clean-dissolve-defs");
+    svg.setAttribute("width", "0");
+    svg.setAttribute("height", "0");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    const defs = document.createElementNS(MIST_SVG_NS, "defs");
+    this.shellMistMask = createEtchMask(
+      `clean-cover-mist-${uid}`,
+      14,
+      9,
+      317 + uid * 23,
+    );
+    this.outMistMask = createEtchMask(
+      `clean-cover-out-mist-${uid}`,
+      14,
+      9,
+      389 + uid * 31,
+    );
+    this.inMistMask = createEtchMask(
+      `clean-cover-in-mist-${uid}`,
+      14,
+      9,
+      461 + uid * 37,
+    );
+    defs.append(
+      this.shellMistMask.mask,
+      this.outMistMask.mask,
+      this.inMistMask.mask,
+    );
+    svg.append(defs);
+
+    const shell = document.createElement("div");
+    shell.className = "clean-cover-shell";
+    this.shell = shell;
+
+    const outFrame = document.createElement("div");
+    outFrame.className = "clean-cover-frame clean-cover-frame--out";
+    outFrame.setAttribute("aria-hidden", "true");
+    outFrame.hidden = true;
+    this.outFrame = outFrame;
+
+    const outCanvas = document.createElement("canvas");
+    outCanvas.className = "clean-cover-canvas";
+    outCanvas.setAttribute("aria-hidden", "true");
+    this.outCanvas = outCanvas;
+    this.outCtx = outCanvas.getContext("2d");
+    outFrame.append(outCanvas);
+
+    const inFrame = document.createElement("div");
+    inFrame.className = "clean-cover-frame clean-cover-frame--in";
+    this.inFrame = inFrame;
 
     const canvas = document.createElement("canvas");
     canvas.className = "clean-cover-canvas";
     canvas.setAttribute("aria-hidden", "true");
     this.displayCanvas = canvas;
     this.displayCtx = canvas.getContext("2d");
+    inFrame.append(canvas);
 
-    this.fromCanvas = document.createElement("canvas");
-    this.fromCtx = this.fromCanvas.getContext("2d");
-    this.toCanvas = document.createElement("canvas");
-    this.toCtx = this.toCanvas.getContext("2d");
-
-    frame.append(canvas);
+    shell.append(outFrame, inFrame);
     this.root.dataset.visible = "false";
     this.root.dataset.hiding = "false";
     this.root.dataset.instant = "false";
     this.root.dataset.dissolving = "false";
     this.root.dataset.src = "";
-    this.root.replaceChildren(frame);
+    this.root.replaceChildren(svg, shell);
   }
 
   private clearLoader() {
@@ -175,56 +223,18 @@ export class CleanCoverPreview {
     }
   }
 
-  private rebuildGrid() {
-    const cellX = new Int32Array(TILE_COLUMNS);
-    const cellW = new Int32Array(TILE_COLUMNS);
-    for (let c = 0; c < TILE_COLUMNS; c++) {
-      const x0 = Math.round((c / TILE_COLUMNS) * this.pw);
-      const x1 = Math.round(((c + 1) / TILE_COLUMNS) * this.pw);
-      cellX[c] = x0;
-      cellW[c] = Math.max(1, x1 - x0);
-    }
-
-    const cellY = new Int32Array(TILE_ROWS);
-    const cellH = new Int32Array(TILE_ROWS);
-    for (let r = 0; r < TILE_ROWS; r++) {
-      const y0 = Math.round((r / TILE_ROWS) * this.ph);
-      const y1 = Math.round(((r + 1) / TILE_ROWS) * this.ph);
-      cellY[r] = y0;
-      cellH[r] = Math.max(1, y1 - y0);
-    }
-
-    this.cellX = cellX;
-    this.cellY = cellY;
-    this.cellW = cellW;
-    this.cellH = cellH;
+  private clearOutgoingFrame() {
+    this.outActive = false;
+    this.outImg = null;
+    this.outSrc = null;
+    this.hasOutPixels = false;
+    this.outCtx?.clearRect(0, 0, this.pw, this.ph);
+    clearMistEtchStyles(this.outFrame);
+    this.outFrame.hidden = true;
   }
 
-  private shuffleTileDelays() {
-    const order = Array.from(
-      { length: TILE_COLUMNS * TILE_ROWS },
-      (_, tile) => tile,
-    );
-    for (let i = order.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [order[i], order[j]] = [order[j], order[i]];
-    }
-
-    if (order[0] === this.tileDelays.indexOf(0)) {
-      const j = 1 + Math.floor(Math.random() * (order.length - 1));
-      [order[0], order[j]] = [order[j], order[0]];
-    }
-
-    const tileDelays = new Float32Array(order.length);
-    const delayStep = (1 - TILE_FADE_FRACTION) / (order.length - 1);
-    order.forEach((tile, i) => {
-      tileDelays[tile] = i * delayStep;
-    });
-    this.tileDelays = tileDelays;
-  }
-
-  private syncCanvasSize(snapshotSource: HTMLCanvasElement | null = null): boolean {
-    const measured = measureCanvasBox(this.frame);
+  private syncCanvasSize(preserveOut = false): boolean {
+    const measured = measureCanvasBox(this.root);
     if (!measured) return false;
     const { cssW, pw, ph, borderRadiusPx } = measured;
     this.cssW = cssW;
@@ -232,27 +242,24 @@ export class CleanCoverPreview {
 
     if (pw === this.pw && ph === this.ph) return true;
 
-    let savedFrom: HTMLCanvasElement | null = null;
-    if (snapshotSource && this.pw > 0 && this.ph > 0) {
-      savedFrom = document.createElement("canvas");
-      savedFrom.width = this.pw;
-      savedFrom.height = this.ph;
-      savedFrom.getContext("2d")?.drawImage(snapshotSource, 0, 0);
+    let savedOut: HTMLCanvasElement | null = null;
+    if (preserveOut && this.hasOutPixels && this.pw > 0 && this.ph > 0) {
+      savedOut = document.createElement("canvas");
+      savedOut.width = this.pw;
+      savedOut.height = this.ph;
+      savedOut.getContext("2d")?.drawImage(this.outCanvas, 0, 0);
     }
 
     this.pw = pw;
     this.ph = ph;
     this.displayCanvas.width = pw;
     this.displayCanvas.height = ph;
-    this.fromCanvas.width = pw;
-    this.fromCanvas.height = ph;
-    this.toCanvas.width = pw;
-    this.toCanvas.height = ph;
-    this.rebuildGrid();
+    this.outCanvas.width = pw;
+    this.outCanvas.height = ph;
 
-    if (savedFrom && this.fromCtx) {
-      this.fromCtx.clearRect(0, 0, pw, ph);
-      this.fromCtx.drawImage(savedFrom, 0, 0, pw, ph);
+    if (savedOut && this.outCtx) {
+      this.outCtx.clearRect(0, 0, pw, ph);
+      this.outCtx.drawImage(savedOut, 0, 0, pw, ph);
     }
     return true;
   }
@@ -274,8 +281,8 @@ export class CleanCoverPreview {
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(img, (pw - dw) / 2, (ph - dh) / 2, dw, dh);
 
-    // Crisp physical-scaled hairline inset border inside the bitmap so reveal/hide
-    // pixel blocks dissolve cleanly against transparent space without a box border.
+    // Crisp physical-scaled hairline inset border inside the bitmap so covers
+    // preserve subtle framing without clipping blurred dissolve edges.
     const strokeW = Math.max(1, pw / Math.max(1, this.cssW || pw));
     const inset = strokeW * 0.5;
     ctx.save();
@@ -292,83 +299,85 @@ export class CleanCoverPreview {
     ctx.restore();
   }
 
-  private snapshotDisplayToFrom() {
-    if (!this.fromCtx || this.pw <= 0 || this.ph <= 0) return;
-    this.fromCtx.clearRect(0, 0, this.pw, this.ph);
-    if (this.hasCanvasPixels) {
-      this.fromCtx.drawImage(this.displayCanvas, 0, 0);
-    }
-  }
-
-  private snapshotWithSizeSync(): boolean {
-    const prevPw = this.pw;
-    const prevPh = this.ph;
-    if (!this.syncCanvasSize(this.hasCanvasPixels ? this.displayCanvas : null)) return false;
-    if (this.pw === prevPw && this.ph === prevPh) {
-      this.snapshotDisplayToFrom();
-    }
-    return true;
-  }
-
-  private drawDissolve(
-    sourceCanvas: HTMLCanvasElement,
-    progress: number,
-    invert: boolean,
-  ) {
-    const ctx = this.displayCtx;
-    if (!ctx || this.pw <= 0 || this.ph <= 0) return;
-
-    const { cellX, cellY, cellW, cellH, tileDelays } = this;
-    let idx = 0;
-
-    for (let r = 0; r < TILE_ROWS; r++) {
-      const y = cellY[r];
-      const h = cellH[r];
-      for (let c = 0; c < TILE_COLUMNS; c++) {
-        const t = clamp01((progress - tileDelays[idx++]) / TILE_FADE_FRACTION);
-        const eased = t * t * (3 - 2 * t);
-        const alpha = invert ? 1 - eased : eased;
-        if (alpha <= 0) continue;
-        const x = cellX[c];
-        const w = cellW[c];
-        ctx.globalAlpha = alpha;
-        ctx.drawImage(sourceCanvas, x, y, w, h, x, y, w, h);
-      }
-    }
-    ctx.globalAlpha = 1;
-  }
-
   private drawCurrentFrame(now: number) {
     const ctx = this.displayCtx;
     if (!ctx || this.pw <= 0 || this.ph <= 0) return;
-    const raw = clamp01((now - this.animStart) / this.animDuration);
 
     if (this.animKind === "reveal") {
-      ctx.clearRect(0, 0, this.pw, this.ph);
-      this.drawDissolve(this.toCanvas, easeDissolve(raw), false);
-      this.hasCanvasPixels = true;
+      const raw = clamp01((now - this.animStart) / this.animDuration);
+      const eased = easeMistReveal(raw);
+      const localT = clamp01((eased - 0.08) / 0.86);
+      applyMistEtchDissolve(
+        this.shell,
+        this.shellMistMask,
+        localT,
+        false,
+        "cover",
+      );
       return;
     }
 
     if (this.animKind === "morph") {
-      ctx.clearRect(0, 0, this.pw, this.ph);
-      ctx.globalAlpha = 1;
-      ctx.drawImage(this.fromCanvas, 0, 0);
-      this.drawDissolve(this.toCanvas, easeDissolve(raw), false);
-      this.hasCanvasPixels = true;
+      if (this.outActive) {
+        const rawOut = clamp01((now - this.outStart) / this.outDuration);
+        applyMistEtchDissolve(
+          this.outFrame,
+          this.outMistMask,
+          easeOutQuad(rawOut),
+          true,
+          "cover",
+          "switch",
+        );
+        if (rawOut >= 1) {
+          this.clearOutgoingFrame();
+        }
+      }
+      const elapsedIn = now - this.inStart - this.inDelay;
+      const rawIn = elapsedIn <= 0 ? 0 : clamp01(elapsedIn / this.inDuration);
+      applyMistEtchDissolve(
+        this.inFrame,
+        this.inMistMask,
+        easeMistReveal(rawIn),
+        false,
+        "cover",
+        "switch",
+      );
       return;
     }
 
     if (this.animKind === "hide") {
-      ctx.clearRect(0, 0, this.pw, this.ph);
-      this.drawDissolve(this.fromCanvas, easeOutQuad(raw), true);
-      this.hasCanvasPixels = raw < 1;
+      const raw = clamp01((now - this.animStart) / this.animDuration);
+      const eased = easeOutQuad(raw);
+      const localT = clamp01((eased - 0.08) / 0.84);
+      applyMistEtchDissolve(
+        this.shell,
+        this.shellMistMask,
+        localT,
+        true,
+        "cover",
+      );
     }
   }
 
   private step = (now: number) => {
     this.rafId = 0;
     if (this.disposed || this.animKind === "none") return;
+
+    if (this.animKind === "morph") {
+      this.drawCurrentFrame(now);
+      const rawIn = clamp01(
+        (now - this.inStart - this.inDelay) / this.inDuration,
+      );
+      if (this.outActive || rawIn < 1) {
+        this.scheduleRaf();
+        return;
+      }
+      this.animKind = "none";
+      this.clearOutgoingFrame();
+      clearMistEtchStyles(this.inFrame);
+      this.root.dataset.dissolving = "false";
+      return;
+    }
 
     const raw = clamp01((now - this.animStart) / this.animDuration);
     if (raw < 1) {
@@ -379,6 +388,9 @@ export class CleanCoverPreview {
 
     const finishedKind = this.animKind;
     this.animKind = "none";
+    clearMistEtchStyles(this.shell);
+    this.clearOutgoingFrame();
+    clearMistEtchStyles(this.inFrame);
     this.root.dataset.dissolving = "false";
 
     if (finishedKind === "hide") {
@@ -386,20 +398,20 @@ export class CleanCoverPreview {
       this.hasCanvasPixels = false;
       this.root.dataset.hiding = "false";
       this.root.dataset.visible = "false";
-      return;
-    }
-
-    if (this.displayCtx && this.pw > 0 && this.ph > 0) {
-      this.displayCtx.clearRect(0, 0, this.pw, this.ph);
-      this.displayCtx.drawImage(this.toCanvas, 0, 0);
-      this.hasCanvasPixels = true;
     }
   };
 
-  private settleInstantShow(img: HTMLImageElement, src: string, instant: boolean) {
+  private settleInstantShow(
+    img: HTMLImageElement,
+    src: string,
+    instant: boolean,
+  ) {
     this.cancelRaf();
     this.animKind = "none";
     this.loadingSrc = null;
+    this.clearOutgoingFrame();
+    clearMistEtchStyles(this.inFrame);
+    clearMistEtchStyles(this.shell);
     this.activeImg = img;
     this.displayedSrc = src;
     this.hasImage = true;
@@ -418,6 +430,9 @@ export class CleanCoverPreview {
     this.cancelRaf();
     this.animKind = "none";
     this.loadingSrc = null;
+    this.clearOutgoingFrame();
+    clearMistEtchStyles(this.inFrame);
+    clearMistEtchStyles(this.shell);
     this.displayCtx?.clearRect(0, 0, this.pw, this.ph);
     this.hasCanvasPixels = false;
     if (preserveInstant) {
@@ -437,35 +452,100 @@ export class CleanCoverPreview {
       return;
     }
 
+    const now = performance.now();
+
+    if (this.animKind === "reveal") {
+      const revealRaw = clamp01((now - this.animStart) / this.animDuration);
+      if (revealRaw < 0.35) {
+        if (!this.syncCanvasSize()) {
+          this.settleInstantShow(img, src, false);
+          return;
+        }
+        this.activeImg = img;
+        this.displayedSrc = src;
+        this.hasImage = true;
+        this.renderImageToCanvas(this.displayCtx, img);
+        this.hasCanvasPixels = true;
+        this.root.dataset.src = src;
+        return;
+      }
+      clearMistEtchStyles(this.shell);
+    }
+
     const wasVisible =
       this.hasImage &&
       this.root.dataset.visible === "true" &&
-      this.hasCanvasPixels;
+      this.hasCanvasPixels &&
+      this.animKind !== "hide";
 
     if (wasVisible) {
-      if (!this.snapshotWithSizeSync()) {
+      clearMistEtchStyles(this.shell);
+      const inProgress =
+        this.animKind === "morph"
+          ? clamp01((now - this.inStart - this.inDelay) / this.inDuration)
+          : 1;
+      const keepExistingOut =
+        this.animKind === "morph" &&
+        this.outActive &&
+        this.hasOutPixels &&
+        inProgress < 0.42;
+
+      if (!this.syncCanvasSize(keepExistingOut)) {
         this.settleInstantShow(img, src, false);
         return;
       }
+
+      if (!keepExistingOut && this.outCtx && this.pw > 0 && this.ph > 0) {
+        this.outCtx.clearRect(0, 0, this.pw, this.ph);
+        this.outCtx.drawImage(this.displayCanvas, 0, 0);
+        this.outImg = this.activeImg;
+        this.outSrc = this.displayedSrc;
+        this.hasOutPixels = true;
+        this.outFrame.hidden = false;
+        this.outDuration = Math.round(MIST_SWITCH_DURATION_MS * 0.62);
+        this.outStart = now;
+        this.outActive = true;
+        bindEtchMask(this.outFrame, this.outMistMask);
+      }
+
+      this.activeImg = img;
+      this.displayedSrc = src;
+      this.hasImage = true;
+      this.renderImageToCanvas(this.displayCtx, img);
+      this.hasCanvasPixels = true;
+
+      this.inDelay = keepExistingOut
+        ? 0
+        : Math.round(MIST_SWITCH_DURATION_MS * 0.14);
+      this.inDuration = MIST_SWITCH_DURATION_MS - this.inDelay;
+      this.inStart = now;
+      bindEtchMask(this.inFrame, this.inMistMask);
+
       this.animKind = "morph";
-      this.animDuration = MORPH_DURATION_MS;
+      this.animStart = now;
+      this.animDuration = Math.max(
+        this.outActive ? this.outStart + this.outDuration - now : 0,
+        this.inDelay + this.inDuration,
+      );
     } else {
+      this.clearOutgoingFrame();
+      clearMistEtchStyles(this.inFrame);
+      clearMistEtchStyles(this.shell);
       if (!this.syncCanvasSize()) {
         this.settleInstantShow(img, src, false);
         return;
       }
       this.animKind = "reveal";
-      this.animDuration = REVEAL_DURATION_MS;
+      this.animDuration = MIST_RETURN_DURATION_MS;
+      this.animStart = now;
+      this.activeImg = img;
+      this.displayedSrc = src;
+      this.hasImage = true;
+      this.renderImageToCanvas(this.displayCtx, img);
+      this.hasCanvasPixels = true;
+      bindEtchMask(this.shell, this.shellMistMask);
     }
 
-    this.activeImg = img;
-    this.displayedSrc = src;
-    this.hasImage = true;
-    this.renderImageToCanvas(this.toCtx, img);
-    this.shuffleTileDelays();
-
-    const now = performance.now();
-    this.animStart = now;
     this.root.dataset.instant = "false";
     this.root.dataset.hiding = "false";
     this.root.dataset.dissolving = "true";
@@ -590,7 +670,11 @@ export class CleanCoverPreview {
       this.desiredVisible = false;
       this.desiredSrc = null;
 
-      if (!this.hasImage || this.root.dataset.visible === "false" || !this.hasCanvasPixels) {
+      if (
+        !this.hasImage ||
+        this.root.dataset.visible === "false" ||
+        !this.hasCanvasPixels
+      ) {
         this.settleInstantHide(!animated);
         return;
       }
@@ -602,17 +686,38 @@ export class CleanCoverPreview {
         return;
       }
 
-      if (!animated || document.hidden || !this.snapshotWithSizeSync()) {
+      if (!animated || document.hidden || !this.hasCanvasPixels) {
         this.settleInstantHide(!animated);
         return;
       }
 
+      const now = performance.now();
+      if (this.animKind === "morph") {
+        const inProgress = clamp01(
+          (now - this.inStart - this.inDelay) / this.inDuration,
+        );
+        if (
+          inProgress < 0.45 &&
+          this.hasOutPixels &&
+          this.displayCtx &&
+          this.pw > 0 &&
+          this.ph > 0
+        ) {
+          this.displayCtx.clearRect(0, 0, this.pw, this.ph);
+          this.displayCtx.drawImage(this.outCanvas, 0, 0);
+          if (this.outImg) this.activeImg = this.outImg;
+          this.displayedSrc = this.outSrc;
+          this.root.dataset.src = this.outSrc ?? "";
+        }
+        this.clearOutgoingFrame();
+        clearMistEtchStyles(this.inFrame);
+      }
+
       this.cancelRaf();
       this.animKind = "hide";
-      this.animDuration = HIDE_DURATION_MS;
-      this.shuffleTileDelays();
-      const now = performance.now();
+      this.animDuration = MIST_HIDE_DURATION_MS;
       this.animStart = now;
+      bindEtchMask(this.shell, this.shellMistMask);
       this.root.dataset.instant = "false";
       this.root.dataset.hiding = "true";
       this.root.dataset.dissolving = "true";
@@ -638,6 +743,36 @@ export class CleanCoverPreview {
       return;
     }
 
+    if (
+      this.animKind === "hide" &&
+      this.hasImage &&
+      this.displayedSrc === src &&
+      this.activeImg &&
+      this.hasCanvasPixels
+    ) {
+      const now = performance.now();
+      const hideRaw = clamp01((now - this.animStart) / this.animDuration);
+      const resumeRaw = clamp01(1 - hideRaw);
+      this.cancelRaf();
+      this.clearCoalesce();
+      this.clearLoader();
+      this.loadToken++;
+      this.loadingSrc = null;
+      this.clearOutgoingFrame();
+      clearMistEtchStyles(this.inFrame);
+      this.animKind = "reveal";
+      this.animDuration = MIST_RETURN_DURATION_MS;
+      this.animStart = now - resumeRaw * this.animDuration;
+      this.root.dataset.instant = "false";
+      this.root.dataset.hiding = "false";
+      this.root.dataset.dissolving = "true";
+      this.root.dataset.visible = "true";
+      bindEtchMask(this.shell, this.shellMistMask);
+      this.drawCurrentFrame(now);
+      this.scheduleRaf();
+      return;
+    }
+
     // Returning cleanly onto the already-displayed settled cover cancels any pending sweep.
     if (
       this.hasImage &&
@@ -658,7 +793,7 @@ export class CleanCoverPreview {
       return;
     }
 
-    if (this.loadingSrc === src && this.animKind === "none") {
+    if (this.loadingSrc === src && this.animKind !== "hide") {
       this.clearCoalesce();
       return;
     }
@@ -699,6 +834,9 @@ export class CleanCoverPreview {
   public finish() {
     if (this.disposed) return;
     this.clearCoalesce();
+    this.clearOutgoingFrame();
+    clearMistEtchStyles(this.inFrame);
+    clearMistEtchStyles(this.shell);
     if (this.animKind === "none") return;
 
     const kind = this.animKind;
@@ -715,9 +853,8 @@ export class CleanCoverPreview {
       return;
     }
 
-    if (this.displayCtx && this.pw > 0 && this.ph > 0) {
-      this.displayCtx.clearRect(0, 0, this.pw, this.ph);
-      this.displayCtx.drawImage(this.toCanvas, 0, 0);
+    if (this.activeImg && this.displayCtx && this.pw > 0 && this.ph > 0) {
+      this.renderImageToCanvas(this.displayCtx, this.activeImg);
       this.hasCanvasPixels = true;
     }
     this.root.dataset.instant = "false";
@@ -729,13 +866,18 @@ export class CleanCoverPreview {
     const prevPw = this.pw;
     const prevPh = this.ph;
     const isAnimating = this.animKind !== "none";
-    const usesFromCanvas = this.animKind === "morph" || this.animKind === "hide";
-    if (!this.syncCanvasSize(usesFromCanvas ? this.fromCanvas : null)) return;
+    const preserveOut = this.animKind === "morph" && this.outActive;
+    if (!this.syncCanvasSize(preserveOut)) return;
     if (this.pw === prevPw && this.ph === prevPh) return;
 
     if (isAnimating) {
-      if (this.activeImg) {
-        this.renderImageToCanvas(this.toCtx, this.activeImg);
+      if (this.activeImg && this.displayCtx) {
+        this.renderImageToCanvas(this.displayCtx, this.activeImg);
+        this.hasCanvasPixels = true;
+      }
+      if (this.outActive && this.outImg && this.outCtx) {
+        this.renderImageToCanvas(this.outCtx, this.outImg);
+        this.hasOutPixels = true;
       }
       this.drawCurrentFrame(performance.now());
       return;
@@ -759,14 +901,15 @@ export class CleanCoverPreview {
     this.clearCoalesce();
     this.clearLoader();
     this.cancelRaf();
+    this.clearOutgoingFrame();
+    clearMistEtchStyles(this.inFrame);
+    clearMistEtchStyles(this.shell);
     this.animKind = "none";
     this.activeImg = null;
     this.imageCache.clear();
     this.displayCanvas.width = 0;
     this.displayCanvas.height = 0;
-    this.fromCanvas.width = 0;
-    this.fromCanvas.height = 0;
-    this.toCanvas.width = 0;
-    this.toCanvas.height = 0;
+    this.outCanvas.width = 0;
+    this.outCanvas.height = 0;
   }
 }
