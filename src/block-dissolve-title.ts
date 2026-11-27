@@ -439,13 +439,7 @@ export class BlockDissolveTitle {
     this.activeTitle = next.title;
     this.activeProvider = next.provider;
 
-    const canAnimate =
-      next.animated &&
-      !document.hidden &&
-      this.root.offsetWidth > 0 &&
-      this.root.offsetHeight > 0;
-
-    if (!canAnimate) {
+    if (!next.animated || document.hidden) {
       this.stopAnimation();
       this.inLayer.text.textContent = next.title;
       this.applyActiveProvider(next.provider, false);
@@ -496,22 +490,34 @@ export class BlockDissolveTitle {
       return true;
     }
 
+    const suppressUnmaterializedPrev =
+      !this.outActive && this.inActive && currentInProgress < 0.25;
+    const hasPrev =
+      !suppressUnmaterializedPrev && (Boolean(prevTitle) || prevIconVisible);
+    const hasNext = Boolean(next.title) || Boolean(next.provider);
+
     // If rapidly sweeping past an intermediate card whose incoming layer has
     // barely materialized (< 42%), let the existing outgoing layer keep fading
     // out instead of snapping the half-drawn card to 100% and flashing.
     const keepExistingOutgoing =
-      this.outActive && currentInProgress < 0.42 && Boolean(this.outgoingTitle);
+      this.outActive &&
+      currentInProgress < 0.42 &&
+      (Boolean(this.outgoingTitle) || Boolean(this.outgoingProvider));
 
     this.seed = (this.seed + 1) | 0;
     this.inSeed = this.seed * 53 + 19;
 
     // Write both DOM layers before reading layout metrics once.
     if (!keepExistingOutgoing) {
-      this.outgoingTitle = prevTitle;
-      this.outgoingProvider = prevProvider;
-      this.outLayer.text.textContent = prevTitle;
-      this.applyOutgoingProvider(prevProvider, prevIconVisible);
-      this.outLayer.root.hidden = false;
+      if (hasPrev) {
+        this.outgoingTitle = prevTitle;
+        this.outgoingProvider = prevProvider;
+        this.outLayer.text.textContent = prevTitle;
+        this.applyOutgoingProvider(prevProvider, prevIconVisible);
+        this.outLayer.root.hidden = false;
+      } else {
+        this.clearOutgoing();
+      }
     }
     this.inLayer.text.textContent = next.title;
     this.applyActiveProvider(next.provider, true);
@@ -519,15 +525,28 @@ export class BlockDissolveTitle {
     const cellSize = this.readCellSize();
     const outRawW = keepExistingOutgoing
       ? this.outMask.width
-      : this.outLayer.root.offsetWidth;
+      : hasPrev
+        ? this.outLayer.root.offsetWidth
+        : 0;
     const outRawH = keepExistingOutgoing
       ? this.outMask.height
-      : this.outLayer.root.offsetHeight;
-    const inRawW = this.inLayer.root.offsetWidth;
-    const inRawH = this.inLayer.root.offsetHeight;
+      : hasPrev
+        ? this.outLayer.root.offsetHeight
+        : 0;
+    const inRawW = hasNext ? this.inLayer.root.offsetWidth : 0;
+    const inRawH = hasNext ? this.inLayer.root.offsetHeight : 0;
 
-    let outWidth = this.outMask.width;
-    if (!keepExistingOutgoing) {
+    if (
+      (hasNext && (inRawW <= 0 || inRawH <= 0)) ||
+      (hasPrev && !keepExistingOutgoing && (outRawW <= 0 || outRawH <= 0)) ||
+      (!hasNext && !hasPrev && !keepExistingOutgoing)
+    ) {
+      this.stopAnimation();
+      return true;
+    }
+
+    let outWidth = keepExistingOutgoing ? this.outMask.width : 0;
+    if (!keepExistingOutgoing && hasPrev) {
       outWidth = this.rebuildMaskGeometry(
         this.outMask,
         outRawW,
@@ -542,28 +561,37 @@ export class BlockDissolveTitle {
       this.outActive = true;
     }
 
-    const inWidth = this.rebuildMaskGeometry(
-      this.inMask,
-      inRawW,
-      inRawH,
-      cellSize,
-      this.inSeed,
-    );
+    const inWidth = hasNext
+      ? this.rebuildMaskGeometry(
+          this.inMask,
+          inRawW,
+          inRawH,
+          cellSize,
+          this.inSeed,
+        )
+      : 0;
 
     const totalDuration = durationForWidth(Math.max(outWidth, inWidth));
-    if (!keepExistingOutgoing) {
+    if (!keepExistingOutgoing && hasPrev) {
       this.outDuration = Math.round(totalDuration * 0.72);
     }
-    this.inStart = now;
-    this.inDelay = keepExistingOutgoing ? 0 : Math.round(totalDuration * 0.1);
-    this.inDuration = Math.round(totalDuration * 0.9);
-    this.inActive = true;
 
-    this.inMask.opacities.fill(-1);
-    this.applyMaskProgress(this.inMask, 0, false);
-    this.setLayerMask(this.inLayer.root, this.inMask.id);
+    if (hasNext) {
+      this.inStart = now;
+      this.inDelay =
+        !keepExistingOutgoing && hasPrev ? Math.round(totalDuration * 0.1) : 0;
+      this.inDuration = Math.round(totalDuration * 0.9);
+      this.inActive = true;
 
-    if (!this.rafId) {
+      this.inMask.opacities.fill(-1);
+      this.applyMaskProgress(this.inMask, 0, false);
+      this.setLayerMask(this.inLayer.root, this.inMask.id);
+    } else {
+      this.inActive = false;
+      this.setLayerMask(this.inLayer.root, null);
+    }
+
+    if ((this.outActive || this.inActive) && !this.rafId) {
       this.rafId = requestAnimationFrame(this.step);
     }
     return true;

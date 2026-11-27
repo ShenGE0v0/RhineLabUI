@@ -30,7 +30,10 @@ try {
         window.__badgeDraws = [];
         const drawImage = CanvasRenderingContext2D.prototype.drawImage;
         CanvasRenderingContext2D.prototype.drawImage = function (image, ...args) {
-          if (this.canvas.width === 2048 && this.canvas.height === 1485) {
+          if (
+            (this.canvas.width === 2048 && this.canvas.height === 1485) ||
+            (this.canvas.width === 1024 && this.canvas.height === 743)
+          ) {
             window.__badgeDraws.push(image.src);
           }
           return drawImage.call(this, image, ...args);

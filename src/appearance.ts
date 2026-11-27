@@ -13,7 +13,10 @@ export class CardAppearance {
   /** 承载解密揭示的材质名。模型没有这个角色时保持 undefined，揭示退化为无效果。 */
   private revealSurface?: string;
   disposeSources() {
-    for (const palette of this.palettes.values()) { palette.high.dispose(); palette.low?.dispose(); }
+    for (const palette of this.palettes.values()) {
+      palette.high.dispose();
+      if (palette.low && palette.low !== palette.high) palette.low.dispose();
+    }
     this.palettes.clear();
     this.revealSurface = undefined;
   }
@@ -157,7 +160,7 @@ export class CardAppearance {
       }
       mesh.userData.appearance.value = value;
       const { high, low } = palette;
-      if (!low) continue;
+      if (!low || low === high) continue;
       const mat = mesh.material as Surface;
       mat.color.copy(low.color).lerp(high.color, value);
       if (

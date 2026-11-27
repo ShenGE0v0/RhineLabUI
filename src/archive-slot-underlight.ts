@@ -84,6 +84,8 @@ export class ArchiveSlotUnderlights {
         (entry.target - entry.intensity) * (1 - Math.exp(-Math.max(0, dt) * rate));
       if (entry.target === 0 && entry.intensity < 0.001) {
         this.entries.delete(key);
+      } else if (entry.target === 1 && 1 - entry.intensity < 0.0005) {
+        entry.intensity = 1;
       }
     }
     this.trim();
@@ -98,15 +100,15 @@ export class ArchiveSlotUnderlights {
     damp(this.barRow, this.targetCell.row, 5.2, clampedDt);
     damp(this.barLane, this.targetCell.lane, 4.8, clampedDt);
     if (
-      Math.abs(this.barRow.value - this.targetCell.row) < 1e-4 &&
-      Math.abs(this.barRow.velocity) < 1e-4
+      Math.abs(this.barRow.value - this.targetCell.row) < 5e-4 &&
+      Math.abs(this.barRow.velocity) < 2e-3
     ) {
       this.barRow.value = this.targetCell.row;
       this.barRow.velocity = 0;
     }
     if (
-      Math.abs(this.barLane.value - this.targetCell.lane) < 1e-4 &&
-      Math.abs(this.barLane.velocity) < 1e-4
+      Math.abs(this.barLane.value - this.targetCell.lane) < 5e-4 &&
+      Math.abs(this.barLane.velocity) < 2e-3
     ) {
       this.barLane.value = this.targetCell.lane;
       this.barLane.velocity = 0;

@@ -73,6 +73,14 @@ export class SharedDepthBokeh extends BokehPass {
   private hardwareDepthQuad: FullScreenQuad;
   constructor(scene: THREE.Scene, camera: THREE.Camera, params: BokehPassParameters, private source: () => SharedDepthAO) {
     super(scene, camera, params);
+    const bokehTarget = "vec2 dofblur = vec2 ( clamp( factor * aperture, -maxblur, maxblur ) );";
+    if (this.materialBokeh.fragmentShader.includes(bokehTarget)) {
+      this.materialBokeh.fragmentShader = this.materialBokeh.fragmentShader.replace(
+        bokehTarget,
+        bokehTarget + "\n\t\t\tif ( abs( dofblur.x ) < 0.00025 ) { gl_FragColor = vec4( texture2D( tColor, vUv.xy ).rgb, 1.0 ); return; }",
+      );
+      this.materialBokeh.needsUpdate = true;
+    }
     this.quad = new FullScreenQuad(this.materialBokeh);
     this.hardwareDepthMaterial = new THREE.ShaderMaterial({
       defines: { ...this.materialBokeh.defines, DEPTH_PACKING: 0 },

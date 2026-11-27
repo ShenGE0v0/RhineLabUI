@@ -39,7 +39,7 @@ export function qualityMarkup(quality: RenderQuality) {
       quality,
       "frameRate",
       "帧率上限",
-      "限制渲染帧率是降低 GPU 占用与发热最直接的方式；静止时自动降到 30",
+      "限制渲染帧率是降低 GPU 占用与发热最直接的方式；静止呼吸时降到 15 fps，失焦或完全静止后暂停重绘",
       [
         [30, "30 fps"],
         [60, "60 fps"],
@@ -70,7 +70,7 @@ export function qualityMarkup(quality: RenderQuality) {
       quality,
       "transmission",
       "透明材质分辨率",
-      `控制盖板折射清晰度。总览最高 ${OVERVIEW_TRANSMISSION_LIMIT * 100}%，详情与 360° 查看器使用所选比例`,
+      `控制盖板折射清晰度。总览与磨砂详情最高 ${OVERVIEW_TRANSMISSION_LIMIT * 100}%，360° 查看器使用所选比例`,
       [0.25, 0.5, 0.75, 1].map((v) => [v, `${v * 100}%`]),
     )}
     ${select(
@@ -105,7 +105,7 @@ export function qualityMarkup(quality: RenderQuality) {
       [0.5, 0.75, 1].map((v) => [v, `${v * 100}%`]),
     )}
     ${range(quality, "depthOfField", "景深强度 · 阵列", "0% 关闭；100% 保留原始镜头虚化", 0, 150)}
-    </div></details><p class="quality-note">即时生效并自动保存。清晰度与材质设置同步至 360° 查看器。高渲染比例更适合静态观察；缓冲上限为 829 万像素，硬件限制时自动收敛。</p>
+    </div></details><p class="quality-note">即时生效并自动保存。清晰度与材质设置同步至 360° 查看器。默认「原始」画质在纯净模式下收敛至 1080p 级缓冲以控制功耗；切换到「高 / 极高」或自定义画质可解锁 829 万像素上限。</p>
   </section>`;
 }
 

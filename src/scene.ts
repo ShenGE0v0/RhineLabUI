@@ -19,6 +19,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
 import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
 import {
+  matchingPreset,
   normalizeQuality,
   OVERVIEW_TRANSMISSION_LIMIT,
   type RenderQuality,
@@ -86,6 +87,21 @@ function glslFloat(value: number) {
   return /[.eE]/.test(text) ? text : `${text}.0`;
 }
 
+function snapSpring(
+  spring: { value: number; velocity: number },
+  target: number,
+  valueEps = 0.0005,
+  velEps = 0.002,
+) {
+  if (
+    Math.abs(spring.value - target) < valueEps &&
+    Math.abs(spring.velocity) < velEps
+  ) {
+    spring.value = target;
+    spring.velocity = 0;
+  }
+}
+
 let rectAreaLightsInitialized = false;
 function ensureRectAreaLightSupport() {
   if (rectAreaLightsInitialized) return;
@@ -104,11 +120,16 @@ const LABEL_SCALE = 2;
 const OVERVIEW_BADGE_WIDTH = 2048;
 const OVERVIEW_BADGE_HEIGHT = 1485;
 const OVERVIEW_BADGE_SCALE = 1;
+const OVERVIEW_SETTLE_SCALE = 0.5;
+const OVERVIEW_HEADER_SCALE = 0.5;
 const OVERVIEW_HEADER_HEIGHT = 386;
 const OVERVIEW_HEADER_FRACTION = OVERVIEW_HEADER_HEIGHT / OVERVIEW_BADGE_HEIGHT;
 const MAX_OVERVIEW_HEADER_CACHE = 12;
-const OVERVIEW_BADGE_SETTLE_SECONDS = 0.18;
+const MAX_OVERVIEW_FULL_CACHE = 12;
+const OVERVIEW_BADGE_SETTLE_SECONDS = 0.42;
 const HOVER_BADGE_HEIGHT = 192;
+const HOVER_BADGE_SCALE = 0.5;
+const MAX_HOVER_BADGE_CACHE = 24;
 const BURN_STAMP_RIGHT = OVERVIEW_BADGE_WIDTH - 90;
 const BURN_STAMP_WIDTH = 525;
 const BURN_STAMP_GAP = 80;
@@ -194,6 +215,7 @@ const REFERENCE_ROW_SPACING = 0.43;
 const MAX_OUTGOING_POOL = 4;
 const OUTGOING_NORMAL_RETURN_COUNT = 3;
 const OUTGOING_CATCH_UP_RATE = 18;
+const MIN_OUTGOING_SPAWN_LIFT = 0.035;
 const OUTGOING_FINISH_LIFT = 0.002;
 const UNDERLIGHT_SLOT_STRENGTH: Partial<Record<SurfaceRole, number>> = {
   acrylic: 0.03,
@@ -481,6 +503,9 @@ function columnSwitchWave(
 export class ArchiveScene {
   private inputEvents = new AbortController();
   revealImmediately() { this.reveal = this.targetReveal; }
+  get isIntroActive() {
+    return this.intro !== null;
+  }
   playIntro() {
     if (
       !this.motion.selectionTransition ||
@@ -540,6 +565,7 @@ export class ArchiveScene {
     this.idleGain = 0;
     this.lastInteraction = this.clock;
     this.renderState.invalidate();
+    this.onIntroChange?.(true);
   }
   finishIntro(snapBar = false, skipBadgeRefresh = false) {
     if (!this.intro) return;
@@ -559,10 +585,12 @@ export class ArchiveScene {
     if (this.pendingOverviewBadgeRefresh) {
       this.pendingOverviewBadgeRefresh = false;
       if (!skipBadgeRefresh) {
-        this.drawFullOverviewBadge(this.selectedIndex);
+        if (this.isDetailBadgeActive()) this.drawFullOverviewBadge(this.selectedIndex);
+        else this.bindOverviewFullBadge(this.selectedIndex);
       }
     }
     this.renderState.invalidate();
+    this.onIntroChange?.(false);
   }
   private async waitInitialProviderLogo(timeoutMs = 300) {
     const modelName = records[this.selectedIndex]?.en ?? "";
@@ -647,9 +675,11 @@ export class ArchiveScene {
         returnY: null,
       });
     }
+    this.warmingUp = true;
     try {
       this.update(performance.now() / 1000);
     } finally {
+      this.warmingUp = false;
       if (warmOutgoing) {
         const idx = this.outgoing.findIndex((o) => o.group === warmOutgoing);
         if (idx >= 0) this.outgoing.splice(idx, 1);
@@ -714,8 +744,17 @@ export class ArchiveScene {
       entry.texture.dispose();
     }
     this.overviewHeaderCache.clear();
+    for (const entry of this.overviewFullCache.values()) {
+      entry.texture.dispose();
+    }
+    this.overviewFullCache.clear();
     this.overviewBadgeUniform.value = undefined;
-    this.hoverBadgeUniform.value?.dispose();
+    for (const entry of this.hoverBadgeCache.values()) {
+      entry.texture.dispose();
+    }
+    this.hoverBadgeCache.clear();
+    this.hoverBadgeFallback?.dispose();
+    this.hoverBadgeFallback = undefined;
     this.hoverBadgeUniform.value = undefined;
     for (const image of this.modelProviderImages.values()) image.onload = null;
     this.modelProviderImages.clear();
@@ -802,6 +841,7 @@ export class ArchiveScene {
           "float archiveActiveGlow = 0.0;\n" +
           `for (int archiveLightIndex = 0; archiveLightIndex < ${MAX_OVERVIEW_SLOT_LIGHTS}; archiveLightIndex++) {\n` +
           "  vec3 archiveLight = archiveSlotLights[archiveLightIndex];\n" +
+          "  if (archiveLight.z <= 0.0001) continue;\n" +
           `  float archiveLightLane = (archiveLight.x - 2.0) * ${glslFloat(COLUMN_SPACING)};\n` +
           `  float archiveLightRow = (archiveLight.y - 15.5) * ${glslFloat(ROW_SPACING)};\n` +
           "  float archiveLightX = abs(archiveLaneLocal - archiveLightLane);\n" +
@@ -835,6 +875,8 @@ export class ArchiveScene {
   ): OverviewSlotLightUniforms | undefined {
     const bottomLight =
       mode === "selected" ? this.overviewBottomLight : this.arrayBottomLight;
+    const slotProximity =
+      mode === "selected" ? this.overviewSelectedSlotProximity : undefined;
     // The authored top seal uses scene lighting plus an overview-only minimum
     // fill. Install it on each final material because Three material clones do
     // not retain onBeforeCompile.
@@ -936,6 +978,9 @@ export class ArchiveScene {
       before.call(material, shader, renderer);
       shader.uniforms.archiveBottomLight = bottomLight;
       shader.uniforms.archiveSlotLightGain = this.overviewSlotLightGain;
+      if (slotProximity) {
+        shader.uniforms.archiveSlotProximity = slotProximity;
+      }
       if (slotLight) {
         shader.uniforms.archiveSlotLight = slotLight.direct;
         shader.uniforms.archiveSlotReflection = slotLight.reflection;
@@ -966,6 +1011,7 @@ export class ArchiveScene {
       shader.fragmentShader =
         "uniform float archiveBottomLight;\n" +
         "uniform float archiveSlotLightGain;\n" +
+        (slotProximity ? "uniform float archiveSlotProximity;\n" : "") +
         "varying float vArchiveSlotLight;\n" +
         "varying float vArchiveSlotReflection;\n" +
         "varying float vArchiveSlotLateral;\n" +
@@ -1046,11 +1092,17 @@ export class ArchiveScene {
           "vec3 archiveActiveWarmWhite = vec3(1.0, 0.68, 0.34);\n" +
           "vec3 archiveReflectionWhite = vec3(1.0, 0.76, 0.56);\n" +
           "vec3 archiveLateralWhite = vec3(1.0, 0.70, 0.38);\n" +
-          `totalEmissiveRadiance += archiveWarmWhite * archiveBottomLight * archiveDefaultGlow * ${glslFloat(baseStrength)};\n` +
-          `totalEmissiveRadiance += archiveActiveWarmWhite * archiveBottomLight * archiveSlotLightGain * archiveActiveGlow * ${glslFloat(activeStrength * 0.75)};\n` +
-          `totalEmissiveRadiance += archiveActiveWarmWhite * archiveBottomLight * archiveSlotLightGain * archiveEndGlow * ${glslFloat(endStrength * 0.65)};\n` +
-          `totalEmissiveRadiance += archiveReflectionWhite * archiveBottomLight * archiveSlotLightGain * archiveReflectionGlow * ${glslFloat(reflectionStrength * 0.30)};\n` +
-          `totalEmissiveRadiance += archiveLateralWhite * archiveBottomLight * archiveSlotLightGain * archiveLateralGlow * ${glslFloat(lateralStrength)};`,
+          (slotProximity
+            ? `totalEmissiveRadiance += archiveWarmWhite * archiveBottomLight * archiveSlotProximity * archiveDefaultGlow * ${glslFloat(baseStrength)};\n` +
+              `totalEmissiveRadiance += archiveActiveWarmWhite * archiveBottomLight * archiveSlotProximity * archiveSlotLightGain * archiveActiveGlow * ${glslFloat(activeStrength * 0.75)};\n` +
+              `totalEmissiveRadiance += archiveActiveWarmWhite * archiveBottomLight * archiveSlotProximity * archiveSlotLightGain * archiveEndGlow * ${glslFloat(endStrength * 0.65)};\n` +
+              `totalEmissiveRadiance += archiveReflectionWhite * archiveBottomLight * archiveSlotProximity * archiveSlotLightGain * archiveReflectionGlow * ${glslFloat(reflectionStrength * 0.30)};\n` +
+              `totalEmissiveRadiance += archiveLateralWhite * archiveBottomLight * archiveSlotProximity * archiveSlotLightGain * archiveLateralGlow * ${glslFloat(lateralStrength)};`
+            : `totalEmissiveRadiance += archiveWarmWhite * archiveBottomLight * archiveDefaultGlow * ${glslFloat(baseStrength)};\n` +
+              `totalEmissiveRadiance += archiveActiveWarmWhite * archiveBottomLight * archiveSlotLightGain * archiveActiveGlow * ${glslFloat(activeStrength * 0.75)};\n` +
+              `totalEmissiveRadiance += archiveActiveWarmWhite * archiveBottomLight * archiveSlotLightGain * archiveEndGlow * ${glslFloat(endStrength * 0.65)};\n` +
+              `totalEmissiveRadiance += archiveReflectionWhite * archiveBottomLight * archiveSlotLightGain * archiveReflectionGlow * ${glslFloat(reflectionStrength * 0.30)};\n` +
+              `totalEmissiveRadiance += archiveLateralWhite * archiveBottomLight * archiveSlotLightGain * archiveLateralGlow * ${glslFloat(lateralStrength)};`),
       );
       applyOverviewLook(
         shader,
@@ -1059,6 +1111,7 @@ export class ArchiveScene {
         hoverBadge,
         badge === this.overviewBadgeUniform ? this.overviewBadgeHeadingEdge : undefined,
         badge === this.overviewBadgeUniform ? this.overviewBadgeHeightFraction : undefined,
+        slotProximity,
       );
     };
     material.customProgramCacheKey = () =>
@@ -1249,6 +1302,7 @@ export class ArchiveScene {
   private ao: SharedDepthAO;
   private bokeh: BokehPass;
   private readonly overviewBottomLight = { value: 0 };
+  private readonly overviewSelectedSlotProximity = { value: 1 };
   private readonly arrayBottomLight = { value: 1 };
   private readonly lightKeyPositionScratch = new THREE.Vector3();
   private readonly lightKeyTargetScratch = new THREE.Vector3();
@@ -1293,6 +1347,8 @@ export class ArchiveScene {
   private renderState = new RenderState();
   private shadowState = new RenderState();
   private shadowTick = 0;
+  private shadowStale = false;
+  private warmingUp = false;
   private idleNow = false;
   // -Infinity keeps the first press from ever matching; the archive index is
   // stored rather than the cell so a rebase cannot invalidate a pending press.
@@ -1304,10 +1360,19 @@ export class ArchiveScene {
   private shadowCoverage?: ArchiveShadowCoverage;
   private instanceCapacity = Math.max(LOOP_COLUMNS * LOOP_ROWS, 640);
   private drawnCells: ArchiveCell[] = [];
+  private readonly hiddenCellKeys = new Set<string>();
   private model = new THREE.Group();
   private appearance = new CardAppearance();
   private cursor = new THREE.Vector2();
   private raycaster = new THREE.Raycaster();
+  private readonly pickInvMatrix = new THREE.Matrix4();
+  private readonly pickInstMatrix = new THREE.Matrix4();
+  private readonly pickIdentityMatrix = new THREE.Matrix4();
+  private readonly pickLocalRay = new THREE.Ray();
+  private readonly pickHitPoint = new THREE.Vector3();
+  private readonly focalPointScratch = new THREE.Vector3();
+  private cachedCanvasRect: DOMRect | null = null;
+  private lastInspectionState = "";
   private dummy = new THREE.Object3D();
   private cells: ArchiveCell[] = [];
   private selectedCell: ArchiveCell = { lane: 2, row: 12 };
@@ -1400,8 +1465,25 @@ export class ArchiveScene {
       providerLoaded: boolean;
     }
   >();
+  private overviewFullCache = new Map<
+    number,
+    {
+      canvas: HTMLCanvasElement;
+      texture: THREE.CanvasTexture;
+      headingEdge: number;
+      providerLoaded: boolean;
+      hasPhoto: boolean;
+    }
+  >();
   private pendingOverviewBadgeRefresh = false;
-  private readonly hoverBadgeCanvas = document.createElement("canvas");
+  private hoverBadgeFallback?: THREE.CanvasTexture;
+  private hoverBadgeCache = new Map<
+    number,
+    {
+      canvas: HTMLCanvasElement;
+      texture: THREE.CanvasTexture;
+    }
+  >();
   private readonly hoverBadgeUniform = { value: undefined as THREE.CanvasTexture | undefined };
   private readonly hoverBadgeInstance = { value: -1 };
   private hoverBadgeIndex = -1;
@@ -1441,6 +1523,7 @@ export class ArchiveScene {
   onOpen?: (index: number) => void;
   onHover?: (index: number | null) => void;
   onNavigate?: (axis: "row" | "lane", direction: number) => void;
+  onIntroChange?: (active: boolean) => void;
   constructor(
     private container: HTMLElement,
     private readonly selectionPulse = baselineSelectionWave,
@@ -1479,6 +1562,8 @@ export class ArchiveScene {
     this.renderer.domElement.addEventListener('webglcontextrestored', () => {
       this.renderState.invalidate();
       this.shadowState.invalidate();
+      this.shadowStale = false;
+      this.shadowTick = 0;
     }, { signal: this.inputEvents.signal });
     this.scene.background = new THREE.Color(WARM.field);
     // The frame updates world matrices once after simulation; subsequent
@@ -1532,6 +1617,7 @@ export class ArchiveScene {
     floor.name = "archive-floor";
     floor.position.y = -4.63;
     floor.receiveShadow = true;
+    floor.renderOrder = -1;
     this.scene.add(floor);
     this.camera.position.set(-62.26, 35.98, 43.28);
     this.cameraAim.set(-0.5, 1.1, 0.4);
@@ -1746,11 +1832,24 @@ export class ArchiveScene {
         role === "diffuser" || role === "shell" || role === "frame";
       selectedMesh.receiveShadow =
         role === "shell" || role === "frame" || role === "card" || role === "seal";
+      if (mat.transmission === 0) selectedMesh.renderOrder = -5;
       this.model.add(selectedMesh);
       // Keep the readable shell, frame, optical edge, card, seal and fastener
       // layers in tightly packed rows. Sub-millimetre typography stays selected.
       if (!ARRAY_ROLES.has(role)) {
         this.appearance.register(name, mat);
+        continue;
+      }
+      if (!geom.boundingBox) geom.computeBoundingBox();
+      // Stacked overview cards completely occlude background printed card faces and rear shells/frames.
+      // Register mat as both high & low so CardAppearance keeps these non-instanced exterior parts opaque.
+      if (
+        role === "card" ||
+        ((role === "shell" || role === "frame") &&
+          geom.boundingBox &&
+          geom.boundingBox.max.z < 0)
+      ) {
+        this.appearance.register(name, mat, mat);
         continue;
       }
       const arrayMat = mat.clone();
@@ -1784,7 +1883,7 @@ export class ArchiveScene {
           );
         };
         arrayMat.roughness = 0.28;
-        arrayMat.clearcoat = 0.3;
+        arrayMat.clearcoat = 0;
         arrayMat.clearcoatRoughness = 0.25;
       }
       if (role === "acrylic") {
@@ -1803,11 +1902,6 @@ export class ArchiveScene {
         arrayMat.color.set(WARM.slot);
         arrayMat.metalness = 0.05;
       }
-      if (role === "card") {
-        // 阵列里卡片只有 40 px，纸面高光读不出来，省掉 clearcoat。
-        arrayMat.clearcoat = 0;
-        arrayMat.roughness = 0.66;
-      }
       this.appearance.register(name, mat, arrayMat);
       this.slotLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
       this.neighborLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
@@ -1824,23 +1918,52 @@ export class ArchiveScene {
       inst.castShadow =
         role === "diffuser" || role === "shell" || role === "frame";
       inst.receiveShadow =
-        role === "shell" || role === "frame" || role === "card" || role === "seal";
+        role === "shell" || role === "frame" || role === "seal";
       inst.frustumCulled = false;
       inst.userData.surfaceRole = role;
+      inst.renderOrder =
+        arrayMat.transmission > 0
+          ? 0
+          : role === "frame" || role === "seal"
+            ? -4
+            : role === "shell"
+              ? -3
+              : -2;
       this.instances.push(inst);
       this.scene.add(inst);
     }
     this.cardPlaneZ = Number.isFinite(cardPlaneZ) ? cardPlaneZ : 0.255;
     // 投影来源按角色兜底：旧模型用 diffuser，新模型没有这个件，退到主体或卡面。
     // 旧代码用非空断言取第一个 castShadow 网格，换模型会直接抛错。
+    const largestArea = (meshes: THREE.InstancedMesh[]) => {
+      let best: THREE.InstancedMesh | undefined;
+      let bestArea = -1;
+      for (const mesh of meshes) {
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        const box = mesh.geometry.boundingBox;
+        const area = box
+          ? (box.max.x - box.min.x) * (box.max.y - box.min.y)
+          : 0;
+        if (area > bestArea) {
+          bestArea = area;
+          best = mesh;
+        }
+      }
+      return best;
+    };
     const shadowSource =
-      this.instances.find((mesh) => mesh.castShadow) ??
-      this.instances.find((mesh) => mesh.userData.surfaceRole === "shell") ??
-      this.instances.find((mesh) => mesh.userData.surfaceRole === "card") ??
+      this.instances.find((mesh) => mesh.userData.surfaceRole === "diffuser") ??
+      largestArea(
+        this.instances.filter((mesh) => mesh.userData.surfaceRole === "shell"),
+      ) ??
+      largestArea(
+        this.instances.filter((mesh) => mesh.userData.surfaceRole === "frame"),
+      ) ??
       this.instances[0];
     if (shadowSource) {
       this.shadowCoverage = new ArchiveShadowCoverage(shadowSource);
       this.scene.add(this.shadowCoverage.mesh);
+      for (const inst of this.instances) inst.castShadow = false;
     } else {
       console.warn("[archive] asset has no array surface; shadows skipped");
     }
@@ -1866,11 +1989,13 @@ export class ArchiveScene {
     this.overviewBadgeTexture.anisotropy =
       this.renderer.capabilities.getMaxAnisotropy();
     this.overviewBadgeUniform.value = this.overviewBadgeTexture;
-    this.hoverBadgeCanvas.width = OVERVIEW_BADGE_WIDTH * OVERVIEW_BADGE_SCALE;
-    this.hoverBadgeCanvas.height = HOVER_BADGE_HEIGHT * OVERVIEW_BADGE_SCALE;
-    const hoverBadge = new THREE.CanvasTexture(this.hoverBadgeCanvas);
+    const hoverFallbackCanvas = document.createElement("canvas");
+    hoverFallbackCanvas.width = 4;
+    hoverFallbackCanvas.height = 4;
+    const hoverBadge = new THREE.CanvasTexture(hoverFallbackCanvas);
     hoverBadge.colorSpace = THREE.SRGBColorSpace;
     hoverBadge.anisotropy = this.overviewBadgeTexture.anisotropy;
+    this.hoverBadgeFallback = hoverBadge;
     this.hoverBadgeUniform.value = hoverBadge;
     if (hasCardSurface) {
       // 总览与离场副本共享 GLB 的烘焙卡面。记录卡面只在打开详情时创建，
@@ -2425,11 +2550,12 @@ export class ArchiveScene {
     }
     // Fixed-detail Web view maintains its own lighting rig; keep AO off there.
     this.ao.enabled = quality.aoSamples > 0 && !this.fixedDetailCamera;
-    this.bokeh.enabled = quality.depthOfField > 0;
+    this.bokeh.enabled = this.shouldEnableBokeh();
     this.smaa.enabled = quality.antialias === "smaa";
     this.renderer.shadowMap.enabled = quality.shadows > 0;
+    const effectiveShadows = this.useCleanEcoBudget ? 1024 : quality.shadows;
     const size = Math.min(
-      quality.shadows || 1024,
+      effectiveShadows || 1024,
       this.renderer.capabilities.maxTextureSize,
     );
     if (this.light.shadow.mapSize.x !== size) {
@@ -2439,6 +2565,32 @@ export class ArchiveScene {
     }
     this.light.shadow.needsUpdate = true;
     applyTextureQuality(this.scene, this.renderer, quality);
+    const badgeAnisotropy = Math.min(
+      quality.anisotropy,
+      this.renderer.capabilities.getMaxAnisotropy(),
+    );
+    for (const tex of [
+      this.overviewBadgeTexture,
+      this.labelTexture,
+      this.hoverBadgeFallback,
+    ]) {
+      if (tex && tex.anisotropy !== badgeAnisotropy) {
+        tex.anisotropy = badgeAnisotropy;
+        tex.needsUpdate = true;
+      }
+    }
+    for (const cache of [
+      this.overviewHeaderCache,
+      this.overviewFullCache,
+      this.hoverBadgeCache,
+    ]) {
+      for (const entry of cache.values()) {
+        if (entry.texture.anisotropy !== badgeAnisotropy) {
+          entry.texture.anisotropy = badgeAnisotropy;
+          entry.texture.needsUpdate = true;
+        }
+      }
+    }
     this.resize();
   }
   private cellPosition(cell: ArchiveCell) {
@@ -2493,6 +2645,19 @@ export class ArchiveScene {
       this.pendingPulse.row -= shift.row;
     }
   }
+  private isDetailBadgeActive() {
+    return (
+      !this.holdingArchive &&
+      !this.archiveMomentum &&
+      (this.targetDetail > 0 || this.detail > 0.05)
+    );
+  }
+  private badgeAnisotropy() {
+    return Math.min(
+      this.quality.anisotropy,
+      this.renderer.capabilities.getMaxAnisotropy(),
+    );
+  }
   select(index: number, navigation?: ArchiveNavigation) {
     if (!this.navigatingDrag) this.cancelPointer();
     this.setHover(null);
@@ -2511,8 +2676,24 @@ export class ArchiveScene {
       changed && cell.lane === previousCell.lane;
     if (
       changed && this.loaded &&
-      (Math.abs(this.lift.value) >= OUTGOING_FINISH_LIFT || this.rotation !== 0)
+      (Math.abs(this.lift.value) >= MIN_OUTGOING_SPAWN_LIFT || this.rotation !== 0)
     ) {
+      while (this.outgoing.length >= MAX_OUTGOING_POOL) {
+        let evictIndex = -1;
+        let lowestScore = Infinity;
+        for (let i = 0; i < this.outgoing.length; i++) {
+          const item = this.outgoing[i];
+          const score =
+            (item.returnY !== null ? 1000 : 0) + Math.abs(item.lift.value);
+          if (score < lowestScore) {
+            lowestScore = score;
+            evictIndex = i;
+          }
+        }
+        if (evictIndex < 0) break;
+        const [evicted] = this.outgoing.splice(evictIndex, 1);
+        this.releaseOutgoingGroup(evicted.group);
+      }
       const group = this.acquireOutgoingGroup();
       this.appearance.apply(
         group,
@@ -2568,7 +2749,7 @@ export class ArchiveScene {
       this.overviewBadgeFullDirty = true;
     }
     if (indexChanged) this.overviewBadgeFullAfter = this.clock + OVERVIEW_BADGE_SETTLE_SECONDS;
-    if (this.targetDetail > 0 || this.detail > 0.001) {
+    if (this.isDetailBadgeActive()) {
       this.ensureFullOverviewBadge(index);
       this.overviewBadgeDirty = false;
     } else {
@@ -2604,12 +2785,22 @@ export class ArchiveScene {
       entry.texture.dispose();
     }
     this.overviewHeaderCache.clear();
+    for (const entry of this.overviewFullCache.values()) {
+      entry.texture.dispose();
+    }
+    this.overviewFullCache.clear();
     this.overviewBadgeFullIndex = -1;
     this.overviewBadgeFullDirty = true;
     this.overviewBadgeFullAfter = 0;
     this.overviewBadgeDirty = false;
     this.pendingOverviewBadgeRefresh = false;
+    this.hoverBadgeUniform.value = this.hoverBadgeFallback;
+    this.hoverBadgeInstance.value = -1;
     this.hoverBadgeIndex = -1;
+    for (const entry of this.hoverBadgeCache.values()) {
+      entry.texture.dispose();
+    }
+    this.hoverBadgeCache.clear();
     this.detailSurfaceIndex = -1;
     this.cancelDetailSurfacePreparation();
 
@@ -2634,9 +2825,20 @@ export class ArchiveScene {
         this.fixedDetailTargetPose = undefined;
         this.fixedDetailCameraBasis = undefined;
       }
-      this.ensureFullOverviewBadge(target);
+      if (this.isDetailBadgeActive()) this.ensureFullOverviewBadge(target);
+      else this.bindOverviewFullBadge(target);
     }
     this.renderState.invalidate();
+  }
+  private invalidateOverviewFullCache(index: number) {
+    const cachedFull = this.overviewFullCache.get(index);
+    if (!cachedFull) return;
+    if (this.overviewBadgeUniform.value === cachedFull.texture) {
+      this.overviewBadgeUniform.value = this.overviewBadgeTexture;
+      this.overviewBadgeHeightFraction.value = 1;
+    }
+    cachedFull.texture.dispose();
+    this.overviewFullCache.delete(index);
   }
   public refreshRecord(
     index: number,
@@ -2652,6 +2854,7 @@ export class ArchiveScene {
       cachedHeader.texture.dispose();
       this.overviewHeaderCache.delete(index);
     }
+    this.invalidateOverviewFullCache(index);
     if (options.coverChanged) {
       this.cardPhotoTokens.set(index, ++this.cardPhotoSeq);
       this.cardPhotoSrc.delete(index);
@@ -2659,6 +2862,15 @@ export class ArchiveScene {
     }
     if (options.statsChanged) {
       this.cardStatsOverrides.delete(index);
+    }
+    const cachedHover = this.hoverBadgeCache.get(index);
+    if (cachedHover) {
+      if (this.hoverBadgeUniform.value === cachedHover.texture) {
+        this.hoverBadgeUniform.value = this.hoverBadgeFallback;
+        this.hoverBadgeInstance.value = -1;
+      }
+      cachedHover.texture.dispose();
+      this.hoverBadgeCache.delete(index);
     }
     if (this.hoverBadgeIndex === index) {
       this.hoverBadgeIndex = -1;
@@ -3055,8 +3267,12 @@ export class ArchiveScene {
       this.pendingOverviewBadgeRefresh = true;
       return;
     }
-    if (forceFull || this.targetDetail > 0 || this.detail > 0.001) {
+    if (this.isDetailBadgeActive()) {
       this.drawFullOverviewBadge(index);
+      this.overviewBadgeDirty = false;
+      this.renderState.invalidate();
+    } else if (forceFull || this.clock >= this.overviewBadgeFullAfter) {
+      this.bindOverviewFullBadge(index);
       this.overviewBadgeDirty = false;
       this.renderState.invalidate();
     }
@@ -3070,8 +3286,11 @@ export class ArchiveScene {
     const token = ++this.cardPhotoSeq;
     this.cardPhotoTokens.set(target, token);
     if (!src) {
-      this.cardPhotoSrc.delete(target);
+      // Keep an empty-string sentinel so explicit rhine.setCardPhoto(null) clearing
+      // prevents render paths from immediately re-fetching record.cover.
+      this.cardPhotoSrc.set(target, "");
       this.cardPhotos.delete(target);
+      this.invalidateOverviewFullCache(target);
       if (refreshBadge) this.refreshSelectedBadge(target, true);
       return;
     }
@@ -3092,6 +3311,7 @@ export class ArchiveScene {
             return;
           }
           this.cardPhotos.set(target, img);
+          this.invalidateOverviewFullCache(target);
           this.refreshSelectedBadge(target, refreshBadge);
         });
     };
@@ -3101,7 +3321,10 @@ export class ArchiveScene {
       }
     };
     img.src = resolved;
-    if (refreshBadge) this.refreshSelectedBadge(target, true);
+    if (refreshBadge) {
+      this.invalidateOverviewFullCache(target);
+      this.refreshSelectedBadge(target, true);
+    }
   }
   public setCardPhoto(src: string | null, index = this.selectedIndex) {
     this.loadCardPhoto(src, index, true);
@@ -3120,6 +3343,7 @@ export class ArchiveScene {
         ...stats,
       });
     }
+    this.invalidateOverviewFullCache(target);
     this.refreshSelectedBadge(target, true);
   }
 
@@ -3252,9 +3476,14 @@ export class ArchiveScene {
     this.modelProviderImages.set(provider, image);
     image.onload = () => {
       if (this.disposed) return;
-      for (const [idx, entry] of this.overviewHeaderCache) {
-        if (modelProvider(records[idx]?.en ?? "") === provider) {
-          entry.providerLoaded = false;
+      for (const entry of this.overviewHeaderCache.entries()) {
+        if (modelProvider(records[entry[0]]?.en ?? "") === provider) {
+          entry[1].providerLoaded = false;
+        }
+      }
+      for (const entry of this.overviewFullCache.entries()) {
+        if (modelProvider(records[entry[0]]?.en ?? "") === provider) {
+          entry[1].providerLoaded = false;
         }
       }
       if (modelProvider(records[this.selectedIndex]?.en ?? "") !== provider) {
@@ -3265,7 +3494,7 @@ export class ArchiveScene {
       }
       if (this.intro) {
         this.pendingOverviewBadgeRefresh = true;
-      } else if (this.targetDetail > 0 || this.detail > 0.001) {
+      } else if (this.isDetailBadgeActive()) {
         this.drawFullOverviewBadge(this.selectedIndex);
         this.overviewBadgeDirty = false;
         this.renderState.invalidate();
@@ -3353,13 +3582,49 @@ export class ArchiveScene {
   }
 
   private drawHoverBadge(index: number) {
-    if (index === this.hoverBadgeIndex || !this.hoverBadgeUniform.value) return;
-    const c = this.hoverBadgeCanvas.getContext("2d");
-    if (!c) return;
-    c.setTransform(OVERVIEW_BADGE_SCALE, 0, 0, OVERVIEW_BADGE_SCALE, 0, 0);
+    if (index === this.hoverBadgeIndex) return;
+    let entry = this.hoverBadgeCache.get(index);
+    if (entry) {
+      this.hoverBadgeCache.delete(index);
+      this.hoverBadgeCache.set(index, entry);
+      this.hoverBadgeUniform.value = entry.texture;
+      this.hoverBadgeIndex = index;
+      return;
+    }
+    if (this.hoverBadgeCache.size >= MAX_HOVER_BADGE_CACHE) {
+      const oldestKey = this.hoverBadgeCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        const oldest = this.hoverBadgeCache.get(oldestKey);
+        this.hoverBadgeCache.delete(oldestKey);
+        if (oldest) entry = oldest;
+      }
+    }
+    if (!entry) {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(OVERVIEW_BADGE_WIDTH * HOVER_BADGE_SCALE);
+      canvas.height = Math.round(HOVER_BADGE_HEIGHT * HOVER_BADGE_SCALE);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = this.badgeAnisotropy();
+      entry = { canvas, texture };
+    }
+    const c = entry.canvas.getContext("2d", { willReadFrequently: true });
+    if (!c) {
+      if (this.hoverBadgeUniform.value === entry.texture) {
+        this.hoverBadgeUniform.value = this.hoverBadgeFallback;
+        this.hoverBadgeInstance.value = -1;
+      }
+      entry.texture.dispose();
+      return;
+    }
+    c.save();
+    c.setTransform(HOVER_BADGE_SCALE, 0, 0, HOVER_BADGE_SCALE, 0, 0);
     c.clearRect(0, 0, OVERVIEW_BADGE_WIDTH, HOVER_BADGE_HEIGHT);
     this.drawOverviewHeading(c, index, false);
-    this.hoverBadgeUniform.value.needsUpdate = true;
+    c.restore();
+    entry.texture.needsUpdate = true;
+    this.hoverBadgeCache.set(index, entry);
+    this.hoverBadgeUniform.value = entry.texture;
     this.hoverBadgeIndex = index;
   }
 
@@ -3392,11 +3657,13 @@ export class ArchiveScene {
       }
       if (!entry) {
         const canvas = document.createElement("canvas");
-        canvas.width = OVERVIEW_BADGE_WIDTH * OVERVIEW_BADGE_SCALE;
-        canvas.height = OVERVIEW_HEADER_HEIGHT * OVERVIEW_BADGE_SCALE;
+        canvas.width = Math.round(OVERVIEW_BADGE_WIDTH * OVERVIEW_HEADER_SCALE);
+        canvas.height = Math.round(
+          OVERVIEW_HEADER_HEIGHT * OVERVIEW_HEADER_SCALE,
+        );
         const texture = new THREE.CanvasTexture(canvas);
         texture.colorSpace = THREE.SRGBColorSpace;
-        texture.anisotropy = this.overviewBadgeTexture.anisotropy;
+        texture.anisotropy = this.badgeAnisotropy();
         entry = {
           canvas,
           texture,
@@ -3407,10 +3674,17 @@ export class ArchiveScene {
     } else {
       this.overviewHeaderCache.delete(index);
     }
-    const c = entry.canvas.getContext("2d");
-    if (!c) return;
+    const c = entry.canvas.getContext("2d", { willReadFrequently: true });
+    if (!c) {
+      if (this.overviewBadgeUniform.value === entry.texture) {
+        this.overviewBadgeUniform.value = this.overviewBadgeTexture;
+        this.overviewBadgeHeightFraction.value = 1;
+      }
+      entry.texture.dispose();
+      return;
+    }
     c.save();
-    c.setTransform(OVERVIEW_BADGE_SCALE, 0, 0, OVERVIEW_BADGE_SCALE, 0, 0);
+    c.setTransform(OVERVIEW_HEADER_SCALE, 0, 0, OVERVIEW_HEADER_SCALE, 0, 0);
     c.clearRect(0, 0, OVERVIEW_BADGE_WIDTH, OVERVIEW_HEADER_HEIGHT);
     const headingBottom = this.drawOverviewHeading(c, index, true);
     this.drawBurnStamp(c, index);
@@ -3426,6 +3700,80 @@ export class ArchiveScene {
     this.overviewBadgeUniform.value = entry.texture;
     this.overviewBadgeHeightFraction.value = OVERVIEW_HEADER_FRACTION;
     this.overviewBadgeHeadingEdge.value = entry.headingEdge;
+  }
+
+  private bindOverviewFullBadge(index: number) {
+    if (!this.overviewBadgeTexture) return;
+    const record = records[index];
+    const cover = resolveRecordCover(record, index);
+    if (cover && !this.cardPhotoSrc.has(index)) {
+      this.loadCardPhoto(cover, index, false);
+    }
+    const provider = modelProvider(record?.en ?? "");
+    const providerReady = !provider || Boolean(this.getModelProviderLogo(record?.en ?? ""));
+    const photo = this.cardPhotos.get(index);
+    const hasPhoto = Boolean(photo?.naturalWidth && photo.naturalHeight);
+    let entry = this.overviewFullCache.get(index);
+    if (
+      entry &&
+      entry.hasPhoto === hasPhoto &&
+      (!provider || entry.providerLoaded || !providerReady)
+    ) {
+      this.overviewFullCache.delete(index);
+      this.overviewFullCache.set(index, entry);
+      this.overviewBadgeUniform.value = entry.texture;
+      this.overviewBadgeHeightFraction.value = 1;
+      this.overviewBadgeHeadingEdge.value = entry.headingEdge;
+      return;
+    }
+    if (!entry) {
+      if (this.overviewFullCache.size >= MAX_OVERVIEW_FULL_CACHE) {
+        const oldestKey = this.overviewFullCache.keys().next().value;
+        if (oldestKey !== undefined) {
+          const oldest = this.overviewFullCache.get(oldestKey);
+          this.overviewFullCache.delete(oldestKey);
+          if (oldest) entry = oldest;
+        }
+      }
+      if (!entry) {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(OVERVIEW_BADGE_WIDTH * OVERVIEW_SETTLE_SCALE);
+        canvas.height = Math.round(OVERVIEW_BADGE_HEIGHT * OVERVIEW_SETTLE_SCALE);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = this.badgeAnisotropy();
+        entry = {
+          canvas,
+          texture,
+          headingEdge: 1,
+          providerLoaded: false,
+          hasPhoto: false,
+        };
+      }
+    } else {
+      this.overviewFullCache.delete(index);
+    }
+    const headingEdgeNormalized = this.renderFullBadgeCanvas(
+      entry.canvas,
+      index,
+      OVERVIEW_SETTLE_SCALE,
+    );
+    if (headingEdgeNormalized === null) {
+      if (this.overviewBadgeUniform.value === entry.texture) {
+        this.overviewBadgeUniform.value = this.overviewBadgeTexture;
+        this.overviewBadgeHeightFraction.value = 1;
+      }
+      entry.texture.dispose();
+      return;
+    }
+    entry.headingEdge = headingEdgeNormalized;
+    entry.providerLoaded = providerReady;
+    entry.hasPhoto = hasPhoto;
+    entry.texture.needsUpdate = true;
+    this.overviewFullCache.set(index, entry);
+    this.overviewBadgeUniform.value = entry.texture;
+    this.overviewBadgeHeightFraction.value = 1;
+    this.overviewBadgeHeadingEdge.value = headingEdgeNormalized;
   }
 
   private ensureFullOverviewBadge(index: number) {
@@ -3444,31 +3792,50 @@ export class ArchiveScene {
 
   private flushOverviewBadge() {
     if (this.intro || !this.overviewBadgeTexture) return;
-    // Keep the cached header during a burst and show the full card once it settles.
-    if (this.targetDetail > 0 || this.detail > 0.001 || this.clock >= this.overviewBadgeFullAfter) {
+    if (this.isDetailBadgeActive()) {
       if (!this.overviewBadgeDirty && !this.overviewBadgeFullDirty &&
         this.overviewBadgeFullIndex === this.selectedIndex &&
         this.overviewBadgeUniform.value === this.overviewBadgeTexture) return;
       this.overviewBadgeDirty = false;
       this.ensureFullOverviewBadge(this.selectedIndex);
+      return;
+    }
+    // Keep the cached header during a burst/drag and bind the cached settled card once idle.
+    if (
+      !this.holdingArchive &&
+      !this.archiveMomentum &&
+      this.clock >= this.overviewBadgeFullAfter
+    ) {
+      const cachedFull = this.overviewFullCache.get(this.selectedIndex);
+      if (
+        !this.overviewBadgeDirty &&
+        cachedFull &&
+        this.overviewBadgeUniform.value === cachedFull.texture
+      ) {
+        return;
+      }
+      this.overviewBadgeDirty = false;
+      this.bindOverviewFullBadge(this.selectedIndex);
     } else if (this.overviewBadgeDirty) {
       this.overviewBadgeDirty = false;
       this.bindOverviewHeaderBadge(this.selectedIndex);
     }
   }
 
-  private drawFullOverviewBadge(index: number) {
-    if (!this.overviewBadgeTexture) return;
-    if (index === this.selectedIndex) this.pendingOverviewBadgeRefresh = false;
+  private renderFullBadgeCanvas(
+    canvas: HTMLCanvasElement,
+    index: number,
+    scale: number,
+  ): number | null {
     const record = records[index];
     const cover = resolveRecordCover(record, index);
     if (cover && !this.cardPhotoSrc.has(index)) {
       this.loadCardPhoto(cover, index, false);
     }
-    const c = this.overviewBadgeCanvas.getContext("2d");
-    if (!c) return;
+    const c = canvas.getContext("2d", { willReadFrequently: true });
+    if (!c) return null;
     c.save();
-    c.setTransform(OVERVIEW_BADGE_SCALE, 0, 0, OVERVIEW_BADGE_SCALE, 0, 0);
+    c.setTransform(scale, 0, 0, scale, 0, 0);
     c.clearRect(0, 0, OVERVIEW_BADGE_WIDTH, OVERVIEW_BADGE_HEIGHT);
     const headingBottom = this.drawOverviewHeading(c, index, true);
     this.drawBurnStamp(c, index);
@@ -3482,8 +3849,6 @@ export class ArchiveScene {
       Math.max(headingBottom + 20, BURN_STAMP_TOP + BURN_STAMP_HEIGHT + 20),
     );
     const headingEdgeNormalized = 1 - headingEdge / OVERVIEW_BADGE_HEIGHT;
-    this.overviewBadgeFullHeadingEdge = headingEdgeNormalized;
-    this.overviewBadgeHeadingEdge.value = headingEdgeNormalized;
     const photo = this.cardPhotos.get(index);
     const hasPhoto = Boolean(photo?.naturalWidth && photo.naturalHeight);
     c.save();
@@ -3491,9 +3856,9 @@ export class ArchiveScene {
     c.rect(px, py, pw, ph);
     c.clip();
     if (photo && hasPhoto) {
-      const scale = Math.max(pw / photo.naturalWidth, ph / photo.naturalHeight);
-      const dw = photo.naturalWidth * scale;
-      const dh = photo.naturalHeight * scale;
+      const fitScale = Math.max(pw / photo.naturalWidth, ph / photo.naturalHeight);
+      const dw = photo.naturalWidth * fitScale;
+      const dh = photo.naturalHeight * fitScale;
       c.imageSmoothingEnabled = true;
       c.imageSmoothingQuality = "high";
       c.drawImage(photo, px + (pw - dw) / 2, py + (ph - dh) / 2, dw, dh);
@@ -3557,6 +3922,20 @@ export class ArchiveScene {
     c.restore();
 
     c.restore();
+    return headingEdgeNormalized;
+  }
+
+  private drawFullOverviewBadge(index: number) {
+    if (!this.overviewBadgeTexture) return;
+    if (index === this.selectedIndex) this.pendingOverviewBadgeRefresh = false;
+    const headingEdgeNormalized = this.renderFullBadgeCanvas(
+      this.overviewBadgeCanvas,
+      index,
+      OVERVIEW_BADGE_SCALE,
+    );
+    if (headingEdgeNormalized === null) return;
+    this.overviewBadgeFullHeadingEdge = headingEdgeNormalized;
+    this.overviewBadgeHeadingEdge.value = headingEdgeNormalized;
     this.overviewBadgeFullIndex = index;
     this.overviewBadgeFullDirty = false;
     this.overviewBadgeUniform.value = this.overviewBadgeTexture;
@@ -3564,7 +3943,7 @@ export class ArchiveScene {
     this.overviewBadgeTexture.needsUpdate = true;
   }
   private ensureInstanceCapacity(required: number) {
-    if (required <= this.instanceCapacity) return;
+    if (!this.instances.length || required <= this.instanceCapacity) return;
     const capacity = Math.max(required, this.instanceCapacity * 2);
     const matrix = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 16), 16).setUsage(THREE.DynamicDrawUsage);
     matrix.array.set(this.instances[0].instanceMatrix.array);
@@ -3597,26 +3976,62 @@ export class ArchiveScene {
     this.topRailLightUpdates = new InstanceUpdates(this.topRailLightAttribute);
     this.instanceCapacity = capacity;
   }
+  private get useCleanEcoBudget() {
+    return (
+      this.fixedDetailCamera &&
+      !this.superPerformance &&
+      matchingPreset(this.quality) === "original"
+    );
+  }
+  private shouldEnableBokeh() {
+    return (
+      this.quality.depthOfField > 0 &&
+      (!this.fixedDetailCamera ||
+        this.warmingUp ||
+        this.detail > 0.01 ||
+        this.targetDetail > 0)
+    );
+  }
   private get transmissionScale() {
-    return this.detail < 0.01 && !this.targetDetail
+    return this.fixedDetailCamera || (this.detail < 0.01 && !this.targetDetail)
       ? Math.min(this.quality.transmission, OVERVIEW_TRANSMISSION_LIMIT)
       : this.quality.transmission;
   }
+  private canvasRect() {
+    if (
+      this.cachedCanvasRect &&
+      this.cachedCanvasRect.width > 0 &&
+      this.cachedCanvasRect.height > 0
+    ) {
+      return this.cachedCanvasRect;
+    }
+    this.cachedCanvasRect =
+      this.renderer.domElement.getBoundingClientRect();
+    return this.cachedCanvasRect;
+  }
   resize() {
+    this.cachedCanvasRect = null;
     this.renderState.invalidate();
     const w = this.container.clientWidth,
       h = this.container.clientHeight;
+    const pixelBudget = this.superPerformance
+      ? 921_600
+      : this.useCleanEcoBudget
+        ? 2_073_600
+        : 8_294_400;
     const dimensions = resizeQuality(
       this.renderer,
       this.composer,
       this.container,
       this.quality,
       this.superPerformance,
+      pixelBudget,
     );
     this.ao.setSize(
       Math.max(1, Math.floor(dimensions.width * this.quality.aoResolution)),
       Math.max(1, Math.floor(dimensions.height * this.quality.aoResolution)),
     );
+    this.bokeh.enabled = this.shouldEnableBokeh();
     this.ao.setSharing(this.ao.enabled && this.bokeh.enabled && this.quality.aoResolution === 1 && !this.superPerformance);
     const transmission = this.transmissionScale;
     this.renderer.transmissionResolutionScale = transmission;
@@ -3678,25 +4093,66 @@ export class ArchiveScene {
     this.onHover?.(cell ? fileAtCell(cell, this.coordinateOrigin.row) : null);
   }
   private pickCell(x: number, y: number) {
-    const r = this.renderer.domElement.getBoundingClientRect();
+    if (this.modelBounds.isEmpty()) return null;
+    const r = this.canvasRect();
+    if (r.width <= 0 || r.height <= 0) return null;
     this.cursor.set(
       ((x - r.left) / r.width) * 2 - 1,
       (-(y - r.top) / r.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(this.cursor, this.camera);
-    const hit = this.raycaster.intersectObjects(
-      [this.instances[0], this.model, ...this.outgoing.map((o) => o.group)],
-      true,
-    )[0];
-    if (!hit) return null;
-    if (hit.instanceId !== undefined) return { ...this.drawnCells[hit.instanceId] };
-    let object: THREE.Object3D | null = hit.object;
-    while (object) {
-      const copy = this.outgoing.find((o) => o.group === object);
-      if (copy) return { ...copy.cell };
-      object = object.parent;
+    this.model.updateMatrixWorld();
+    const instances = this.instances[0];
+    if (instances) instances.updateMatrixWorld();
+
+    let bestDistSq = Infinity;
+    let bestCell: ArchiveCell | null = null;
+    const testMatrix = (worldMatrix: THREE.Matrix4) => {
+      if (Math.abs(worldMatrix.determinant()) < 1e-12) return false;
+      this.pickInvMatrix.copy(worldMatrix).invert();
+      this.pickLocalRay
+        .copy(this.raycaster.ray)
+        .applyMatrix4(this.pickInvMatrix);
+      if (
+        !this.pickLocalRay.intersectBox(this.modelBounds, this.pickHitPoint)
+      ) {
+        return false;
+      }
+      this.pickHitPoint.applyMatrix4(worldMatrix);
+      const distSq = this.pickHitPoint.distanceToSquared(
+        this.raycaster.ray.origin,
+      );
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        return true;
+      }
+      return false;
+    };
+
+    if (instances) {
+      const worldIsIdentity = instances.matrixWorld.equals(
+        this.pickIdentityMatrix,
+      );
+      for (let i = 0; i < this.drawnCells.length; i++) {
+        instances.getMatrixAt(i, this.pickInstMatrix);
+        if (!worldIsIdentity) {
+          this.pickInstMatrix.premultiply(instances.matrixWorld);
+        }
+        if (testMatrix(this.pickInstMatrix)) {
+          bestCell = this.drawnCells[i];
+        }
+      }
     }
-    return { ...this.selectedCell };
+    if (testMatrix(this.model.matrixWorld)) {
+      bestCell = this.selectedCell;
+    }
+    for (const o of this.outgoing) {
+      o.group.updateMatrixWorld();
+      if (testMatrix(o.group.matrixWorld)) {
+        bestCell = o.cell;
+      }
+    }
+    return bestCell ? { ...bestCell } : null;
   }
   private trackCoordinate(axis: DragAxis, value: number) {
     return axis === "lane"
@@ -3707,7 +4163,7 @@ export class ArchiveScene {
     this.model.updateMatrixWorld(true);
     this.camera.updateMatrixWorld(true);
     const center = this.model.localToWorld(new THREE.Vector3(0, 1.85, 0));
-    const rect = this.renderer.domElement.getBoundingClientRect();
+    const rect = this.canvasRect();
     const project = (motion: THREE.Vector3) => {
       const from = center
         .clone()
@@ -3780,7 +4236,7 @@ export class ArchiveScene {
         this.archiveMomentum
       )
         return;
-      const r = canvas.getBoundingClientRect();
+      const r = this.canvasRect();
       this.pointer.set(
         (e.clientX - r.left) / r.width - 0.5,
         (e.clientY - r.top) / r.height - 0.5,
@@ -3866,7 +4322,11 @@ export class ArchiveScene {
       this.dragging = !browse && this.canInspect;
       startTrack = { lane: this.columnCamera.value, row: this.rail.value };
       this.archiveDrag.start(e.clientX, e.clientY, this.dragProjection(), e.timeStamp);
-      canvas.setPointerCapture(e.pointerId);
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore synthetic pointers without an active OS pointer id */
+      }
     }, { signal: this.inputEvents.signal });
     canvas.addEventListener("pointermove", (e) => {
       if (activePointer !== null && e.pointerId !== activePointer) return;
@@ -3996,7 +4456,13 @@ export class ArchiveScene {
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) this.cancelPointer();
     }, { signal: this.inputEvents.signal });
-    window.addEventListener("resize", () => this.cancelPointer(), { signal: this.inputEvents.signal });
+    window.addEventListener("resize", () => {
+      this.cachedCanvasRect = null;
+      this.cancelPointer();
+    }, { signal: this.inputEvents.signal });
+    window.addEventListener("scroll", () => {
+      this.cachedCanvasRect = null;
+    }, { passive: true, signal: this.inputEvents.signal });
     // After multi-touch cancels capture, a finger can finish outside the canvas.
     window.addEventListener("pointerup", (e) => pointers.delete(e.pointerId), { signal: this.inputEvents.signal });
     window.addEventListener("pointercancel", (e) =>
@@ -4057,9 +4523,18 @@ export class ArchiveScene {
     const blend = 1 - Math.exp(-dt * (this.motion.selectionTransition ? 2.8 : 35));
     const detailBlend = 1 - Math.exp(-dt * (this.motion.detailTransition ? 2.8 : 35));
     this.reveal = THREE.MathUtils.lerp(this.reveal, this.targetReveal, blend);
+    if (Math.abs(this.reveal - this.targetReveal) < 1e-4) {
+      this.reveal = this.targetReveal;
+    }
     this.rotation = this.targetDetail
       ? THREE.MathUtils.lerp(this.rotation, this.targetRotation, detailBlend)
       : returnStep(this.rotation, dt, !this.motion.detailTransition);
+    if (
+      this.targetDetail &&
+      Math.abs(this.rotation - this.targetRotation) < 1e-4
+    ) {
+      this.rotation = this.targetRotation;
+    }
     if (!this.canBrowse()) {
       this.setHover(null);
       if (this.holdingArchive || this.archiveMomentum) this.cancelPointer();
@@ -4081,6 +4556,7 @@ export class ArchiveScene {
       const target = key === hoverKey ? hoverTarget : 0;
       const next = !this.motion.selectionTransition ? target : THREE.MathUtils.lerp(value, target, 1 - Math.exp(-dt * 14));
       if (target === 0 && next < 0.0001) this.hoverLifts.delete(key);
+      else if (target > 0 && Math.abs(next - target) < 0.0005) this.hoverLifts.set(key, target);
       else this.hoverLifts.set(key, next);
     }
     const hoverLift = (cell: ArchiveCell) => this.hoverLifts.get(cellKey(cell)) ?? 0;
@@ -4097,11 +4573,16 @@ export class ArchiveScene {
       }
     } else {
       damp(this.shoulder, selectedRow, 5, dt);
+      snapSpring(this.shoulder, selectedRow);
       damp(this.laneFocus, selectedLane, 4, dt);
+      snapSpring(this.laneFocus, selectedLane);
       // A held or freely coasting plane owns both tracks; selection cannot pull it.
       if (!this.holdingArchive && !momentum) {
         damp(this.columnCamera, chosen.x, 3.7, dt);
-        damp(this.rail, SELECTED_ROW_ANCHOR_Z - chosen.z, 3.7, dt);
+        snapSpring(this.columnCamera, chosen.x);
+        const railTarget = SELECTED_ROW_ANCHOR_Z - chosen.z;
+        damp(this.rail, railTarget, 3.7, dt);
+        snapSpring(this.rail, railTarget);
       }
     }
     if (momentum) {
@@ -4129,6 +4610,8 @@ export class ArchiveScene {
     // for a while it settles completely, which lets the exact-state reuse below
     // skip every draw until the next input. Any pointer, key or wheel wakes it.
     const idleFor = time - this.lastInteraction;
+    const focused =
+      typeof document.hasFocus !== "function" || document.hasFocus();
     const idle =
       this.motion.idleWave &&
       this.targetReveal > 0 &&
@@ -4137,20 +4620,26 @@ export class ArchiveScene {
       this.returnY === null &&
       !aligningCopy &&
       idleFor > 2.5 &&
-      idleFor < 60;
+      idleFor < 7.5 &&
+      focused;
     this.idleGain = THREE.MathUtils.lerp(
       this.idleGain,
       idle ? 1 : 0,
-      1 - Math.exp(-dt * (idle ? 0.8 : 4)),
+      1 - Math.exp(-dt * (idle ? 0.8 : focused ? 5 : 8)),
     );
     // Snap, or the exponential tail would keep the matrices changing forever.
-    if (!idle && this.idleGain < 1e-4) this.idleGain = 0;
+    if (!idle && this.idleGain < 5e-4) this.idleGain = 0;
     this.idleNow = idle;
+    const pulseTarget =
+      this.targetDetail || this.returnY !== null || aligningCopy ? 0 : 1;
     this.pulseGain = THREE.MathUtils.lerp(
       this.pulseGain,
-      this.targetDetail || this.returnY !== null || aligningCopy ? 0 : 1,
+      pulseTarget,
       1 - Math.exp(-dt * 8),
     );
+    if (Math.abs(this.pulseGain - pulseTarget) < 1e-4) {
+      this.pulseGain = pulseTarget;
+    }
     // Fixed Web detail frames keep the overview field while logical detail
     // advances independently for decryption and application state.
     const fieldDetail = this.fixedDetailCamera ? 0 : this.detail;
@@ -4313,6 +4802,7 @@ export class ArchiveScene {
               : 4.2,
           dt,
         );
+        snapSpring(this.lift, liftTarget);
       }
     }
     const cameraTarget = this.fixedDetailCamera
@@ -4326,6 +4816,9 @@ export class ArchiveScene {
                 (INSPECTION_LIFT - OVERVIEW_LIFT),
             );
     this.detail = THREE.MathUtils.lerp(this.detail, cameraTarget, detailBlend);
+    if (Math.abs(this.detail - cameraTarget) < 0.001) {
+      this.detail = cameraTarget;
+    }
     const detail = this.detail;
     const renderDetail = this.fixedDetailCamera ? 0 : detail;
     const lightOverview = 1 - renderDetail;
@@ -4485,10 +4978,14 @@ export class ArchiveScene {
           DETAIL_CAMERA_LEAD_END,
         );
         damp(this.detailCameraAimMove, 1, DETAIL_CAMERA_AIM_OPEN_RATE, dt);
+        snapSpring(this.detailCameraAimMove, 1);
         damp(this.detailCameraMove, lead, DETAIL_CAMERA_ORBIT_OPEN_RATE, dt);
+        snapSpring(this.detailCameraMove, lead);
       } else if (this.returnY === null) {
         damp(this.detailCameraAimMove, 0, DETAIL_CAMERA_CLOSE_RATE, dt);
+        snapSpring(this.detailCameraAimMove, 0);
         damp(this.detailCameraMove, 0, DETAIL_CAMERA_CLOSE_RATE, dt);
+        snapSpring(this.detailCameraMove, 0);
       }
     }
     const cameraMove = fixedPose
@@ -4580,16 +5077,26 @@ export class ArchiveScene {
             ? 1 - Math.exp(-dt * 5)
             : 1;
       this.camera.position.lerp(cameraPosition, cameraBlend);
+      if (this.camera.position.distanceToSquared(cameraPosition) < 1e-6) {
+        this.camera.position.copy(cameraPosition);
+      }
       this.cameraAim.lerp(cameraAim, cameraBlend);
+      if (this.cameraAim.distanceToSquared(cameraAim) < 1e-6) {
+        this.cameraAim.copy(cameraAim);
+      }
       this.camera.lookAt(this.cameraAim);
       this.camera.rotateZ(LIGHT_OVERVIEW_ROLL * (1 - cameraDetail));
+      const targetFov = THREE.MathUtils.radToDeg(
+        2 * Math.atan(framing.span / (2 * distance)),
+      );
       this.camera.fov = THREE.MathUtils.lerp(
         this.camera.fov,
-        THREE.MathUtils.radToDeg(
-          2 * Math.atan(framing.span / (2 * distance)),
-        ),
+        targetFov,
         cameraBlend,
       );
+      if (Math.abs(this.camera.fov - targetFov) < 1e-4) {
+        this.camera.fov = targetFov;
+      }
       this.cameraInitialized = true;
     }
     const fog = this.scene.fog as THREE.Fog;
@@ -4634,7 +5141,14 @@ export class ArchiveScene {
       stripZ,
     );
     this.overviewAreaLight.intensity =
-      OVERVIEW_RECT_LIGHT_INTENSITY * stripGain;
+      OVERVIEW_RECT_LIGHT_INTENSITY * stripGain * (1 - detail);
+    const extractedFromSlot = THREE.MathUtils.smoothstep(
+      this.lift.value,
+      OVERVIEW_LIFT + 0.15,
+      OVERVIEW_LIFT + 1.85,
+    );
+    this.overviewSelectedSlotProximity.value =
+      1 - Math.max(extractedFromSlot, detail);
     this.overviewLightStrip.position.set(stripX, -4.52, stripZ);
     this.overviewLightStripMaterial.opacity = Math.min(1, 0.95 * stripGain);
     this.overviewLightStrip.visible = stripGain > 0.005;
@@ -4694,13 +5208,17 @@ export class ArchiveScene {
     // Build and compact the instance set only after the actual damped camera
     // is final for this frame. Picking uses the same packed index-to-cell map.
     this.cells = this.visibility.update(this.camera, fog.far, trackX, entryZ + this.rail.value, false);
-    const hidden = new Set(this.outgoing.map(o => cellKey(o.cell)));
-    hidden.add(cellKey(this.selectedCell));
-    this.drawnCells = [];
+    this.hiddenCellKeys.clear();
+    for (const o of this.outgoing) this.hiddenCellKeys.add(cellKey(o.cell));
+    this.hiddenCellKeys.add(cellKey(this.selectedCell));
+    this.drawnCells.length = 0;
     this.hoverBadgeInstance.value = -1;
-    this.drawCoverage.update(this.camera);
+    this.drawCoverage.update(this.camera, fog.far + 1.5);
     this.shadowCoverage?.begin();
-    this.matrixUpdates ??= new InstanceUpdates(this.instances[0].instanceMatrix);
+    const primaryInstance = this.instances[0];
+    if (primaryInstance) {
+      this.matrixUpdates ??= new InstanceUpdates(primaryInstance.instanceMatrix);
+    }
     if (this.slotLightAttribute) {
       this.slotLightUpdates ??= new InstanceUpdates(this.slotLightAttribute);
     }
@@ -4715,7 +5233,7 @@ export class ArchiveScene {
     }
     for (const cell of this.cells) {
       const { row, lane } = cell;
-      if (hidden.has(cellKey(cell))) continue;
+      if (this.hiddenCellKeys.has(cellKey(cell))) continue;
       const x = (lane - 2) * COLUMN_SPACING - trackX;
       const y = -4.6 + field(row, lane) + hoverLift(cell);
       const z = (row - 15.5) * ROW_SPACING + entryZ + this.rail.value;
@@ -4729,7 +5247,7 @@ export class ArchiveScene {
       this.shadowCoverage?.add(this.dummy.matrix);
       if (!this.drawCoverage.contains(x, y, z)) continue;
       const i = this.drawnCells.length;
-      this.ensureInstanceCapacity(i + 1);
+      if (primaryInstance) this.ensureInstanceCapacity(i + 1);
       this.drawnCells.push(cell);
       if (this.hoverCell && sameCell(cell, this.hoverCell)) {
         this.hoverBadgeInstance.value = i;
@@ -4751,10 +5269,12 @@ export class ArchiveScene {
         i,
         this.slotUnderlights.topRailFor(cell),
       );
-      this.matrixUpdates!.set(i * 16, this.dummy.matrix.elements);
+      this.matrixUpdates?.set(i * 16, this.dummy.matrix.elements);
     }
-    const countChanged = this.instances[0].count !== this.drawnCells.length;
-    const visibleMatricesChanged = this.matrixUpdates!.commit();
+    const countChanged = primaryInstance
+      ? primaryInstance.count !== this.drawnCells.length
+      : false;
+    const visibleMatricesChanged = this.matrixUpdates?.commit() ?? false;
     const shadowMatricesChanged = this.shadowCoverage?.commit() ?? false;
     const slotLightsChanged = this.slotLightUpdates?.commit() ?? false;
     const neighborLightsChanged =
@@ -4776,7 +5296,12 @@ export class ArchiveScene {
     }
     // Picking uses only the first instanced surface. The other batches disable
     // renderer culling and do not need an O(n) bound recomputation each frame.
-    if (geometryChanged || countChanged || !this.instances[0].boundingSphere) this.instances[0].computeBoundingSphere();
+    if (
+      primaryInstance &&
+      (geometryChanged || countChanged || !primaryInstance.boundingSphere)
+    ) {
+      primaryInstance.computeBoundingSphere();
+    }
     let neighborTop = -Infinity;
     const lane = selectedLane,
       row = selectedRow;
@@ -4808,7 +5333,10 @@ export class ArchiveScene {
     else if (inspectionReady) inspectionState = "ready";
     else if (fixedDetailRaised) inspectionState = "raised";
     else if (this.targetDetail) inspectionState = "lifting";
-    this.container.dataset.inspection = inspectionState;
+    if (inspectionState !== this.lastInspectionState) {
+      this.lastInspectionState = inspectionState;
+      this.container.dataset.inspection = inspectionState;
+    }
     if (
       this.fixedDetailCameraHeld &&
       !this.targetDetail &&
@@ -4846,13 +5374,22 @@ export class ArchiveScene {
         LIGHT_OVERVIEW_FOCUS_HEIGHT,
         lightOverview,
       );
-      const focalPoint = this.model.position
-        .clone()
-        .add(new THREE.Vector3(0, focusHeight, 0))
+      const focalPoint = this.focalPointScratch
+        .copy(this.model.position)
+        .setY(this.model.position.y + focusHeight)
         .applyMatrix4(this.camera.matrixWorldInverse);
       bokehUniforms.focus.value = -focalPoint.z;
     }
     this.lastRenderedFocusDepth = bokehUniforms.focus.value;
+    const nextBokehEnabled = this.shouldEnableBokeh();
+    if (this.bokeh.enabled !== nextBokehEnabled) {
+      this.bokeh.enabled = nextBokehEnabled;
+      this.container.dataset.renderQuality = JSON.stringify({
+        ...this.readRenderMetrics(),
+        depthOfField: nextBokehEnabled ? this.quality.depthOfField : 0,
+      });
+      this.renderState.invalidate();
+    }
     bokehUniforms.aperture.value =
       ((THREE.MathUtils.lerp(
         OVERVIEW_APERTURE,
@@ -4886,7 +5423,10 @@ export class ArchiveScene {
         this.overviewBadgeUniform.value?.uuid ?? "",
         this.overviewBadgeUniform.value?.version ?? 0,
         this.hoverBadgeInstance.value,
+        this.hoverBadgeUniform.value?.uuid ?? "",
         this.hoverBadgeUniform.value?.version ?? 0,
+        Number(this.shadowStale),
+        Number(this.bokeh.enabled),
       );
       state.floats(
         this.overviewBadgeHeightFraction.value,
@@ -4898,6 +5438,7 @@ export class ArchiveScene {
         this.studioSkyLight.intensity, this.scene.environmentIntensity,
         this.overviewTrackOffset.value.x, this.overviewTrackOffset.value.y,
         this.overviewSlotLightGain.value,
+        this.overviewSelectedSlotProximity.value,
         ...this.overviewAreaLight.position.toArray(),
         this.overviewAreaLight.intensity,
         this.intro?.elapsed ?? -1,
@@ -4957,11 +5498,19 @@ export class ArchiveScene {
       shadow.floats(...object.matrixWorld.elements);
       if (object instanceof THREE.InstancedMesh) shadow.add(object.count, object.instanceMatrix.version);
     });
-    // While the array only breathes, a one-frame-old shadow map is
-    // indistinguishable; skipping it halves the cost of that pass.
+    // While breathing or rapidly sliding/returning outgoing cards, update shadows
+    // every other rendered frame while tracking staleness for exact reuse.
     const shadowChanged = shadow.end() || this.light.shadow.needsUpdate;
-    this.renderer.shadowMap.needsUpdate =
-      shadowChanged && (!idle || this.shadowTick++ % 2 === 0);
+    const throttleShadow =
+      idle ||
+      this.holdingArchive ||
+      this.archiveMomentum !== null ||
+      this.outgoing.length > 0;
+    const shouldUpdateShadow =
+      (shadowChanged || this.shadowStale) &&
+      (!throttleShadow || this.shadowTick++ % 2 === 0);
+    this.renderer.shadowMap.needsUpdate = shouldUpdateShadow;
+    this.shadowStale = shouldUpdateShadow ? false : this.shadowStale || shadowChanged;
     if (this.superPerformance) this.renderer.render(this.scene, this.camera);
     else this.composer.render();
   }

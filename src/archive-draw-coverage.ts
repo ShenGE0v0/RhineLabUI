@@ -7,12 +7,22 @@ import { InstanceUpdates } from "./instance-updates.ts";
 export class ArchiveDrawCoverage {
   private frustum = new THREE.Frustum();
   private matrix = new THREE.Matrix4();
+  private proj = new THREE.Matrix4();
   private box = new THREE.Box3();
-  update(camera: THREE.PerspectiveCamera) {
-    this.matrix.multiplyMatrices(
-      camera.projectionMatrix,
-      camera.matrixWorldInverse,
-    );
+  update(camera: THREE.PerspectiveCamera, maxFar?: number) {
+    if (maxFar !== undefined && maxFar < camera.far) {
+      this.proj.copy(camera.projectionMatrix);
+      const n = camera.near;
+      const f = Math.max(n + 1, maxFar);
+      this.proj.elements[10] = -(f + n) / (f - n);
+      this.proj.elements[14] = -(2 * f * n) / (f - n);
+      this.matrix.multiplyMatrices(this.proj, camera.matrixWorldInverse);
+    } else {
+      this.matrix.multiplyMatrices(
+        camera.projectionMatrix,
+        camera.matrixWorldInverse,
+      );
+    }
     this.frustum.setFromProjectionMatrix(this.matrix);
   }
   contains(x: number, y: number, z: number) {

@@ -40,6 +40,7 @@ export function resizeQuality(
   host: HTMLElement,
   quality: RenderQuality,
   superPerformance = false,
+  pixelBudget?: number,
 ) {
   const width = Math.max(1, host.clientWidth),
     height = Math.max(1, host.clientHeight);
@@ -50,7 +51,7 @@ export function resizeQuality(
     host.getBoundingClientRect().width / width,
     devicePixelRatio,
     renderer.capabilities.maxTextureSize,
-    superPerformance ? 921_600 : 8_294_400,
+    pixelBudget ?? (superPerformance ? 921_600 : 8_294_400),
   );
   renderer.setPixelRatio(dimensions.ratio);
   renderer.setSize(width, height);

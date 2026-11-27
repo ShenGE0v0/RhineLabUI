@@ -10,7 +10,7 @@
 
 | 维度 | 网页端（纯净画布 `.web-archive-clean`） |
 | --- | --- |
-| 2D HUD 与侧边栏 | 默认隐藏 `.brand`、`.system-nav`、`#archive-ui`、`#detail-ui`、`.powered`、`.system-footer`、`#inspection-marks` 及归档态更新提示，仅在右上角保留非交互的 `.clean-archive-title`（总览下随鼠标悬停卡片实时切换对应模型厂商 SVG 图标（匹配时显示）与作品标题，并以从左到右波浪散点细方格同步交叉溶解过渡；未悬停或详情态下回退显示当前选中档案的厂商图标与标题） |
+| 2D HUD 与侧边栏 | 默认隐藏 `.brand`、`.system-nav`、`#archive-ui`、`#detail-ui`、`.powered`、`.system-footer`、`#inspection-marks` 及归档态更新提示，仅在右上角保留非交互的 `.clean-archive-title` 与正下方的 `.clean-archive-cover` 封面预览窗（两者均在入场过场期间隐藏；待入场选档就绪或被打断后，`.clean-archive-title` 以从左到右波浪散点细方格同步交叉溶解显现，`.clean-archive-cover` 同步淡入并于总览态右对齐显示当前悬停或选中档案的 16:10 封面；总览悬停、`select` 与 `rhine.setCardPhoto()` 触发双层交叉淡入切换，数据集重载/布局刷新立即同步，进入 `detail` 详情态或无可用封面时自动隐藏，保留 `.clean-archive-title` 回退显示当前选中档案标题） |
 | 详情推进方式 | 启用 `fixedDetailCamera`，恒定 `6.556°` 长焦球面双弹簧推进，背景维持总览阵列表现 |
 | 快捷键 | 方向键、滚轮、拖拽、`Enter`/双击打开详情、`Esc` 返回、`/` 检索、手柄 `Home` 收藏弹窗 |
 
@@ -72,7 +72,7 @@
 
 ## 6. 正面卡面版式与 Code 39 条码
 
-运行时在 `REF_Glass` 完整前面（局部 `x: -2.362..2.362, y: 0.139..3.565`）通过 `2048 × 1485` RGBA 透明 `CanvasTexture`（`flipY = false`）按 Alpha 混合绘制三区信息，透明留白完整保留磨砂玻璃与底部琥珀透光：
+运行时在 `REF_Glass` 完整前面（局部 `x: -2.362..2.362, y: 0.139..3.565`）通过 RGBA 透明 `CanvasTexture`（`flipY = false`；详情特写为 `2048 × 1485` 全尺寸，稳定总览驻留 `0.5×` 即 `1024 × 743` 缓存板，悬停预览为 `1024 × 96`）按 Alpha 混合绘制三区信息，透明留白完整保留磨砂玻璃与底部琥珀透光：
 
 1. **左上抬头区**（`drawOverviewHeading`，预留右侧 `80 px` 防撞印章）：
    - 第一行：中文作品标题（`title`，92 px 加粗单行自适应）；

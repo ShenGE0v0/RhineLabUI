@@ -13,7 +13,7 @@ export type RenderQuality = {
   anisotropy: number;
 };
 
-export const OVERVIEW_TRANSMISSION_LIMIT = 0.5;
+export const OVERVIEW_TRANSMISSION_LIMIT = 0.25;
 
 export const superPerformanceQuality: RenderQuality = {
   scale: 60, frameRate: 60, pixelRatio: 1, antialias: "off", shadows: 0, aoSamples: 0,

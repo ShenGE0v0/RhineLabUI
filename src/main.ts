@@ -54,6 +54,7 @@ import {
   type ModelProvider,
 } from "./model-provider";
 import { BlockDissolveTitle } from "./block-dissolve-title";
+import { CleanCoverPreview } from "./clean-cover-preview";
 import { TerminalAudio } from "./audio";
 import { audioSettingsMarkup } from "./audio-settings";
 import {
@@ -94,6 +95,7 @@ $("#stage").innerHTML = `
     <div class="archive-hint"><kbd>←</kbd> <kbd>→</kbd> 切换列 <span>／</span> <kbd>↑</kbd> <kbd>↓</kbd> 前后档案 <span>／</span> <kbd>ENTER</kbd> 读取</div>
   </section>
   <div id="clean-archive-title" class="clean-archive-title" aria-hidden="true"></div>
+  <div id="clean-archive-cover" class="clean-archive-cover" aria-hidden="true" data-visible="false"></div>
   <div id="clean-title-live" class="clean-title-live" aria-live="polite" aria-atomic="true"></div>
   <section id="detail-ui" class="detail-ui" aria-label="档案内容" hidden>
     <button class="back-button" data-action="back">← <span>ARCHIVE OVERVIEW</span><small>ESC</small></button>
@@ -283,8 +285,8 @@ const cleanTitleLive = $("#clean-title-live");
 const cleanTitle = new BlockDissolveTitle({
   root: $("#clean-archive-title"),
   resolveProviderUrl: (provider) => assetUrl(modelProviderAssetPath(provider)),
-  initialTitle: records[selected]?.title ?? "",
-  initialProvider: modelProvider(records[selected]?.en ?? ""),
+  initialTitle: "",
+  initialProvider: undefined,
 });
 cleanTitleLive.textContent = records[selected]?.title ?? "";
 function syncCleanTitle(
@@ -294,8 +296,16 @@ function syncCleanTitle(
   const index =
     mode === "archive" && hoveredIndex !== null ? hoveredIndex : selected;
   const record = records[index];
+  const title = record?.title ?? "";
+  if (!started || (mode === "archive" && Boolean(scene?.isIntroActive))) {
+    cleanTitle.update({ title: "", provider: undefined, animated: false });
+    if (announce && cleanTitleLive.textContent !== title) {
+      cleanTitleLive.textContent = title;
+    }
+    return;
+  }
   const next = {
-    title: record?.title ?? "",
+    title,
     provider: modelProvider(record?.en ?? ""),
     animated,
   };
@@ -303,6 +313,42 @@ function syncCleanTitle(
   if (announce && cleanTitleLive.textContent !== next.title) {
     cleanTitleLive.textContent = next.title;
   }
+}
+const cleanCover = new CleanCoverPreview($("#clean-archive-cover"));
+const cardPhotoOverrides = new Map<number, string | null>();
+function sanitizeManualCover(src: unknown): string | null {
+  if (typeof src !== "string") return null;
+  const trimmed = src.trim();
+  if (!trimmed || /[\u0000-\u001f\u007f]/.test(trimmed)) return null;
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)) {
+    return /^(https?:|data:image\/|blob:)/i.test(trimmed) ? trimmed : null;
+  }
+  return trimmed;
+}
+function resolveCleanCoverUrl(index: number): string | null {
+  const raw = cardPhotoOverrides.has(index)
+    ? (cardPhotoOverrides.get(index) ?? null)
+    : resolveRecordCover(records[index], index);
+  if (!raw) return null;
+  return /^(https?:|data:image\/|blob:)/i.test(raw) || raw.startsWith("/")
+    ? raw
+    : assetUrl(raw);
+}
+function syncCleanCover(
+  animated = motionActive("surfaceTransitions") && mode === "archive",
+) {
+  const visible =
+    started && mode === "archive" && !Boolean(scene?.isIntroActive);
+  if (!visible) {
+    cleanCover.update({ src: null, visible: false, animated });
+    return;
+  }
+  const index = hoveredIndex !== null ? hoveredIndex : selected;
+  cleanCover.update({
+    src: resolveCleanCoverUrl(index),
+    visible: true,
+    animated,
+  });
 }
 const audio = new TerminalAudio();
 function configureAudio() {
@@ -373,6 +419,7 @@ function savePrefs() {
     );
   if (!motionActive("surfaceTransitions")) {
     detailTransition.finish();
+    cleanCover.finish();
     modalTransition?.finish();
     tabTransition.finish();
     bookmarkFeedback?.cancel();
@@ -515,6 +562,10 @@ function setMode(next: Mode) {
   audio.setScene(next);
   $("#stage").dataset.mode = next;
   if (previousMode !== next) fit();
+  syncCleanCover(motionActive("surfaceTransitions") && next === "archive");
+  if (next !== "archive" && !motionActive("surfaceTransitions")) {
+    cleanCover.finish();
+  }
   $("#archive-ui").inert = next !== "archive" || Boolean(modal);
   $("#archive-ui").setAttribute("aria-hidden", String(next !== "archive"));
   $(".system-nav").inert = Boolean(modal);
@@ -554,7 +605,7 @@ function stepColumn(direction: number) {
 }
 function updateSelection(
   navigation?: ArchiveNavigation,
-  animateTitle = motionActive("rollingText") && mode === "archive",
+  animate = true,
 ) {
   const r = records[selected];
   selectedId = r.id;
@@ -589,7 +640,8 @@ function updateSelection(
     direction,
   });
   hoveredIndex = null;
-  syncCleanTitle(animateTitle, true);
+  syncCleanTitle(animate && motionActive("rollingText") && mode === "archive", true);
+  syncCleanCover(animate && motionActive("surfaceTransitions") && mode === "archive");
   fileCounter.update({
     value: files.indexOf(selected) + 1,
     animated: hudNumberAnimated,
@@ -1133,13 +1185,20 @@ let lastRenderedAt = -Infinity;
 function frameInterval() {
   const cap = effectiveRenderQuality().frameRate;
   if (!cap) return 0;
-  // The idle array only breathes on an 8 s cycle; half rate is indistinguishable
-  // and roughly halves sustained GPU load while someone is just reading. Open
-  // dialogs dim the scene without animating it, so they may throttle too.
+  // Unfocused tabs and idle breathing settle cleanly at a low rate to save
+  // GPU power without delaying active interactions.
+  const focused =
+    typeof document.hasFocus !== "function" || document.hasFocus();
+  if (!focused && !viewer?.isOpen && !document.hidden) {
+    return 1000 / Math.min(cap, 20);
+  }
   const settled =
     !viewer?.isOpen && !document.hidden && (scene?.isIdle ?? false);
-  return 1000 / (settled ? Math.min(cap, 30) : cap);
+  return 1000 / (settled ? Math.min(cap, 15) : cap);
 }
+const stageEl = $("#stage");
+const sceneEl = $("#three-scene");
+let lastDetailShade = "";
 function frame(ms: number) {
   if (document.hidden) {
     requestAnimationFrame(frame);
@@ -1176,16 +1235,16 @@ function frame(ms: number) {
     !modal &&
     !viewer?.isOpen
   ) {
-    const target = $("#three-scene");
-    if (!target.closest("[inert]")) {
-      target.focus({ preventScroll: true });
-      if (document.activeElement === target) pendingDetailFocus = false;
+    if (!sceneEl.closest("[inert]")) {
+      sceneEl.focus({ preventScroll: true });
+      if (document.activeElement === sceneEl) pendingDetailFocus = false;
     }
   }
-  $("#stage").style.setProperty(
-    "--detail-shade",
-    String(scene?.detailVisibility ?? 0),
-  );
+  const detailShade = String(scene?.detailVisibility ?? 0);
+  if (detailShade !== lastDetailShade) {
+    lastDetailShade = detailShade;
+    stageEl.style.setProperty("--detail-shade", detailShade);
+  }
   if (Math.floor(time) !== lastTime) {
     lastTime = Math.floor(time);
     updateFooterClock(new Date(), motionActive("rollingNumbers"));
@@ -1195,7 +1254,7 @@ function frame(ms: number) {
     fps = (frameCount * 1000) / (ms - frameStart);
     frameStart = ms;
     frameCount = 0;
-    $("#three-scene").dataset.fps = String(Math.round(fps));
+    sceneEl.dataset.fps = String(Math.round(fps));
   }
   requestAnimationFrame(frame);
 }
@@ -1217,16 +1276,23 @@ function bindScene(scene: ArchiveScene) {
       if (hoveredIndex !== null) {
         hoveredIndex = null;
         syncCleanTitle(false);
+        syncCleanCover(false);
       }
       return;
     }
     hoveredIndex = i;
     syncCleanTitle();
+    syncCleanCover();
   };
   scene.onNavigate = (axis, direction) => {
     if (mode !== "archive" || modal || viewer?.isOpen) return;
     if (axis === "lane") stepColumn(direction);
     else stepFile(direction);
+  };
+  scene.onIntroChange = (active) => {
+    if (!started) return;
+    syncCleanTitle(!active && motionActive("rollingText") && mode === "archive");
+    syncCleanCover(!active && motionActive("surfaceTransitions") && mode === "archive");
   };
 }
 
@@ -1251,6 +1317,7 @@ let syncedDatasetVersion = getArchiveDatasetVersion();
 function syncDatasetLayout(nextIndex: number) {
   selected = nextIndex;
   hoveredIndex = null;
+  cardPhotoOverrides.clear();
   filter = categories[0] ?? "全部作品";
   rebuildColumnMemory();
   scene?.reloadData(selected);
@@ -1275,13 +1342,22 @@ function syncArchiveData(event: ArchiveDataChangeEvent) {
       : -1;
     if (!sameScope) accessLog.length = 0;
     loadDatasetBookmarks();
+    cardPhotoOverrides.clear();
     syncDatasetLayout(Math.max(0, preservedIndex));
   } else if (event.kind === "cover-resolver") {
+    cardPhotoOverrides.clear();
     if (missedUpdate) syncDatasetLayout(selected);
-    else scene?.reloadData(selected);
+    else {
+      scene?.reloadData(selected);
+      syncCleanCover(false);
+    }
   } else if (event.kind === "update") {
     const { previousRecord, previousStableId, updatedIndex, layoutChanged, statsChanged } = event;
     const updated = records[updatedIndex];
+    const coverChanged =
+      resolveRecordCover(previousRecord, updatedIndex) !==
+      resolveRecordCover(updated, updatedIndex);
+    if (coverChanged) cardPhotoOverrides.delete(updatedIndex);
     if (previousRecord.id !== updated.id && saved.delete(previousRecord.id)) {
       saved.add(updated.id);
       if (bookmarkStore) {
@@ -1296,13 +1372,16 @@ function syncArchiveData(event: ArchiveDataChangeEvent) {
       syncDatasetLayout(selected);
     } else {
       scene?.refreshRecord(updatedIndex, {
-        coverChanged: resolveRecordCover(previousRecord, updatedIndex) !== resolveRecordCover(updated, updatedIndex),
+        coverChanged,
         statsChanged,
       });
       if (updatedIndex === selected) {
         updateSelection(undefined, false);
         if (mode === "detail") renderDetail();
-      } else if (updatedIndex === hoveredIndex) syncCleanTitle(false);
+      } else if (updatedIndex === hoveredIndex) {
+        syncCleanTitle(false);
+        syncCleanCover(false);
+      }
       renderResults();
     }
   }
@@ -1385,6 +1464,8 @@ function completeStartup(musicDisabled: boolean) {
   // Place the grid in frame immediately and play the 4-stage overview entrance.
   scene?.revealImmediately();
   if (reviewParams.get("scene") !== "detail") scene?.playIntro();
+  syncCleanTitle(false);
+  syncCleanCover(false);
   $("#stage").inert = false;
   loading.classList.add("loaded");
   loading.inert = true;
@@ -1428,8 +1509,18 @@ const rhine = {
     },
     replayIntro: () => scene?.playIntro(),
     slotLightGain: (gain: number) => scene?.setOverviewSlotLightGain(gain),
-    setCardPhoto: (src: string | null, index?: number) =>
-      scene?.setCardPhoto(src, index),
+    setCardPhoto: (src: string | null, index?: number) => {
+      if (!records.length) return;
+      const target =
+        index === undefined || !Number.isFinite(index)
+          ? selected
+          : Math.max(0, Math.min(records.length - 1, Math.floor(index)));
+      const safeSrc = src === null ? null : sanitizeManualCover(src);
+      if (src !== null && safeSrc === null) return;
+      scene?.setCardPhoto(safeSrc, target);
+      cardPhotoOverrides.set(target, safeSrc);
+      syncCleanCover(motionActive("surfaceTransitions") && mode === "archive");
+    },
     setCardStats: (
       stats: {
         sample?: string;
@@ -1468,5 +1559,6 @@ if (import.meta.hot)
     datasetRequest?.abort();
     if (exportBlobUrl) URL.revokeObjectURL(exportBlobUrl);
     cleanTitle.finish();
+    cleanCover.dispose();
     audio.dispose();
   });

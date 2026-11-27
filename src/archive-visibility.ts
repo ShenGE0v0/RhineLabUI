@@ -9,13 +9,40 @@ export class ArchiveVisibility {
   private matrix = new THREE.Matrix4();
   private box = new THREE.Box3();
   candidates = 0;
-  private previous: number[] = [];
+  private previous = new Float64Array(38);
+  private hasPrevious = false;
   private cachedCells: ArchiveCell[] = [];
   update(source: THREE.PerspectiveCamera, far: number, trackX: number, trackZ: number, extra: boolean): ArchiveCell[] {
-    const inputs = [...source.projectionMatrix.elements, ...source.matrixWorldInverse.elements,
-      source.near, source.far, far, trackX, trackZ, Number(extra)];
-    if (inputs.every((value, i) => value === this.previous[i])) return this.cachedCells;
-    this.previous = inputs;
+    const p = source.projectionMatrix.elements;
+    const m = source.matrixWorldInverse.elements;
+    const extraNum = Number(extra);
+    if (this.hasPrevious) {
+      let same =
+        this.previous[32] === source.near &&
+        this.previous[33] === source.far &&
+        this.previous[34] === far &&
+        this.previous[35] === trackX &&
+        this.previous[36] === trackZ &&
+        this.previous[37] === extraNum;
+      if (same) {
+        for (let i = 0; i < 16; i++) {
+          if (this.previous[i] !== p[i] || this.previous[16 + i] !== m[i]) {
+            same = false;
+            break;
+          }
+        }
+      }
+      if (same) return this.cachedCells;
+    }
+    this.previous.set(p, 0);
+    this.previous.set(m, 16);
+    this.previous[32] = source.near;
+    this.previous[33] = source.far;
+    this.previous[34] = far;
+    this.previous[35] = trackX;
+    this.previous[36] = trackZ;
+    this.previous[37] = extraNum;
+    this.hasPrevious = true;
     this.camera.copy(source, false);
     this.camera.far = Math.min(source.far, Math.max(source.near + 1, far + 8));
     this.camera.updateProjectionMatrix();

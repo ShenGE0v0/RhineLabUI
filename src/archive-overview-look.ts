@@ -89,9 +89,15 @@ export function applyOverviewLook(
   hoverBadge?: { instance: { value: number }; heightFraction: number },
   selectedHeadingEdge?: { value: number },
   selectedBadgeHeightFraction?: { value: number },
+  slotProximity?: WebGLProgramParametersWithUniforms["uniforms"][string],
 ) {
   if (role !== "glass" && role !== "acrylic" && role !== "frame" &&
       role !== "shell" && role !== "card" && role !== "engrave") return;
+
+  if (slotProximity) {
+    shader.uniforms.archiveSlotProximity = slotProximity;
+  }
+  const slotProximityExpr = slotProximity ? "archiveSlotProximity" : "1.0";
 
   shader.vertexShader =
     "varying vec3 vOverviewPosition; varying vec3 vOverviewNormal;\n" +
@@ -121,6 +127,7 @@ export function applyOverviewLook(
     );
     float slotDirect =
       clamp(vArchiveSlotLight, 0.0, 1.0) * archiveSlotLightGain;
+    float slotProximity = ${slotProximityExpr};
     float slotNeighbor =
       clamp(vArchiveSlotReflection, 0.0, 1.0) * archiveSlotLightGain;
     float slotTopRail =
@@ -229,7 +236,7 @@ export function applyOverviewLook(
         0.42 * archiveBottomLight * slotDirect * frameFacing
       );
       float frameDirectSlot =
-        slotDirect * frameDirectHeight *
+        slotDirect * slotProximity * frameDirectHeight *
         max(frameLeftPillar * endFacing, frameDirectBand * faceFacing);
       float frameEdgeTone =
         clamp(endFacing / max(endFacing + faceFacing, 0.001), 0.0, 1.0);
@@ -396,13 +403,13 @@ export function applyOverviewLook(
       outgoingLight = mix(
         outgoingLight,
         vec3(1.20, 0.64, 0.22),
-        clamp(0.78 * archiveBottomLight * slotDirect * directFrontMask, 0.0, 0.78)
+        clamp(0.78 * archiveBottomLight * slotDirect * slotProximity * directFrontMask, 0.0, 0.78)
       );
       outgoingLight = mix(
         outgoingLight,
         vec3(1.18, 0.76, 0.34),
         clamp(
-          0.82 * archiveBottomLight * slotDirect *
+          0.82 * archiveBottomLight * slotDirect * slotProximity *
             directEdgeZone * opticalVertical * directEdgeFall,
           0.0, 0.82
         )
@@ -513,7 +520,7 @@ export function applyOverviewLook(
           outgoingLight,
           outgoingLight * vec3(1.0, 0.88, 0.72),
           0.22 * glassWarmBody * faceFacing *
-            archiveBottomLight * slotDirect
+            archiveBottomLight * slotDirect * slotProximity
         );
       `;
     }
@@ -542,7 +549,7 @@ export function applyOverviewLook(
       float topRailShoulder =
         topRailLong * topRailShoulderFacing * topRailShoulderHeight *
         (1.0 - 0.62 * topRailCoreFacing);
-      float topDirect = slotDirect;
+      float topDirect = slotDirect * slotProximity;
       float topNeighbor = slotNeighbor;
       float topRailSpill = slotTopRailPrimary;
       float topLateralAmount =
@@ -630,7 +637,7 @@ export function applyOverviewLook(
       outgoingLight = mix(
         outgoingLight,
         vec3(1.20, 0.64, 0.22),
-        clamp(0.82 * faceFacing * archiveBottomLight * slotDirect * backingLeftDirect, 0.0, 0.84)
+        clamp(0.82 * faceFacing * archiveBottomLight * slotDirect * slotProximity * backingLeftDirect, 0.0, 0.84)
       );
       // Same-column front/back neighbors: keep the recessed panel inside the
       // frame in warm amber-brown, with only a narrow outer left rim transition.
