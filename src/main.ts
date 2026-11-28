@@ -19,6 +19,7 @@ import {
   columnFiles,
   fileLocation,
   getArchiveBookmarkScope,
+  getActiveModelSortId,
   getArchiveDataVersion,
   getArchiveDatasetSnapshot,
   getArchiveDatasetVersion,
@@ -26,9 +27,11 @@ import {
   resolveRecordCover,
   setArchiveDataset,
   setCoverResolver,
+  sortArchiveByModel,
   subscribeArchiveData,
   updateArchiveRecord,
   type ArchiveDataChangeEvent,
+  type ArchiveModelSortTarget,
 } from "./data";
 import {
   createFetchAdapter,
@@ -50,6 +53,7 @@ import {
 } from "./model-provider";
 import { BlockDissolveTitle } from "./block-dissolve-title";
 import { CleanCoverPreview } from "./clean-cover-preview";
+import { MistDissolveToast } from "./mist-dissolve-toast";
 import { TerminalAudio } from "./audio";
 import {
   createMotionPreferences,
@@ -76,7 +80,7 @@ $("#stage").innerHTML = `
   <div id="clean-title-live" class="clean-title-live" aria-live="polite" aria-atomic="true"></div>
   <div id="pwa-update-notice" class="pwa-update-notice" role="status" hidden><span>新版本已就绪</span><button data-pwa-action="update">更新并重启 ↻</button></div>
   <div id="modal-root"></div><div id="toast" class="toast" role="status"></div>
-  <div id="loading" class="loading"><div class="loading-mark">${logo}</div><span>CONNECTING TO DEMO ARCHIVE</span><i></i></div>
+  <div id="loading" class="loading"><div class="loading-mark" role="img" aria-label="DeepDemos — AI Demo Archive">${logo}</div><span>CONNECTING TO DEEPDEMOS</span><i></i></div>
 `;
 $("#three-scene").tabIndex = -1;
 
@@ -90,7 +94,6 @@ let modal: "search" | "saved" | null = null,
   searchQuery = "",
   filter = categories[0] ?? "全部作品";
 const reviewParams = new URLSearchParams(location.search);
-let toastTimer: ReturnType<typeof setTimeout>;
 let previousFocus: HTMLElement | null = null;
 let modalTransition: SurfaceTransition | undefined;
 let modalClosing = false;
@@ -217,14 +220,53 @@ function syncCleanTitle(
     cleanTitleLive.textContent = next.title;
   }
 }
+const toast = new MistDissolveToast({
+  root: $("#toast"),
+  shouldAnimate: () => motionActive("surfaceTransitions"),
+});
 const cleanCover = new CleanCoverPreview($("#clean-archive-cover"));
 const modelVotesPanel = new ModelVotesPanel({
   root: $("#model-votes-panel"),
   resolveProviderUrl: (provider) => assetUrl(modelProviderAssetPath(provider)),
   entries: getModelVotes(),
+  shouldAnimate: () => motionActive("surfaceTransitions"),
+  onSelectModel: (entry) => {
+    if (mode !== "archive" || modal) return;
+    applyModelSort({
+      id: entry.id,
+      name: entry.name,
+      provider: entry.provider,
+    });
+  },
 });
+function applyModelSort(target: ArchiveModelSortTarget | null) {
+  if (target && target.id === getActiveModelSortId()) {
+    const reset = sortArchiveByModel(null);
+    if (modelVotesPanel.stats().activeSort !== reset.activeId) {
+      modelVotesPanel.setActiveModel(reset.activeId);
+    }
+    return reset;
+  }
+  const result = sortArchiveByModel(target);
+  if (target !== null && result.matchCount === 0) {
+    if ($("#stage").dataset.layout === "portrait") {
+      modelVotesPanel.setOpen(false);
+    }
+    notify(`当前档案库暂无 ${target.name} 对应作品`);
+    return result;
+  }
+  if (modelVotesPanel.stats().activeSort !== result.activeId) {
+    modelVotesPanel.setActiveModel(result.activeId);
+  }
+  return result;
+}
 const stopModelVotesSync = subscribeModelVotes((entries) => {
   modelVotesPanel.setEntries(entries);
+  const currentSort = getActiveModelSortId();
+  if (currentSort && !entries.some((item) => item.id === currentSort)) {
+    sortArchiveByModel(null);
+  }
+  modelVotesPanel.setActiveModel(getActiveModelSortId());
   window.dispatchEvent(
     new CustomEvent("rhine:model-votes-change", { detail: entries }),
   );
@@ -460,10 +502,7 @@ function openFile() {
   });
 }
 function notify(message: string) {
-  clearTimeout(toastTimer);
-  $("#toast").textContent = message;
-  $("#toast").classList.add("visible");
-  toastTimer = setTimeout(() => $("#toast").classList.remove("visible"), 2600);
+  toast.show(message, motionActive("surfaceTransitions"));
 }
 
 function openModal(kind: NonNullable<typeof modal>) {
@@ -814,6 +853,16 @@ function syncArchiveData(event: ArchiveDataChangeEvent) {
     loadDatasetBookmarks();
     cardPhotoOverrides.clear();
     syncDatasetLayout(Math.max(0, preservedIndex));
+    modelVotesPanel.setActiveModel(getActiveModelSortId());
+  } else if (event.kind === "reorder") {
+    selected = 0;
+    hoveredIndex = null;
+    cardPhotoOverrides.clear();
+    rebuildColumnMemory();
+    scene?.reloadData(0, { animate: motionActive("selectionTransition") });
+    updateSelection(undefined, true);
+    if (modal === "search" || modal === "saved") renderModal();
+    modelVotesPanel.setActiveModel(getActiveModelSortId());
   } else if (event.kind === "cover-resolver") {
     cardPhotoOverrides.clear();
     if (missedUpdate) syncDatasetLayout(selected);
@@ -901,8 +950,8 @@ async function start() {
       // With unicode-range faces, preload the brand characters, not every
       // font shard. Other archive text loads on demand.
       document.fonts.load(
-        "600 20px MiSans",
-        "AI DEMO ARCHIVE ANALYSIS OS",
+        "700 40px MiSans",
+        "DEEPDEMOS AI DEMO ARCHIVE",
       ),
       bootstrapVotesPromise,
     ]);
@@ -1027,6 +1076,19 @@ const rhine = {
     setModelVotes,
     getModelVotes,
     setModelVotesOpen: (open: boolean) => modelVotesPanel.setOpen(Boolean(open)),
+    sortByModel: (idOrName?: string | null) => {
+      if (idOrName == null) return applyModelSort(null);
+      const clean = String(idOrName).trim();
+      if (!clean) return applyModelSort(null);
+      const matched = getModelVotes().find(
+        (item) => item.id === clean || item.name === clean,
+      );
+      return applyModelSort(
+        matched
+          ? { id: matched.id, name: matched.name, provider: matched.provider }
+          : { id: clean, name: clean, provider: modelProvider(clean) },
+      );
+    },
     stats: () => ({
       ...scene?.getStats(),
       fps: Math.round(fps),
@@ -1054,6 +1116,7 @@ if (import.meta.hot)
     datasetRequest?.abort();
     cleanTitle.finish();
     cleanCover.dispose();
+    toast.dispose();
     modelVotesPanel.dispose();
     audio.dispose();
   });

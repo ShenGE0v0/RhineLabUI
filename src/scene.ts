@@ -2476,7 +2476,7 @@ export class ArchiveScene {
       this.overviewBadgeDirty = true;
     }
   }
-  public reloadData(nextIndex = 0) {
+  public reloadData(nextIndex = 0, options: { animate?: boolean } = {}) {
     if (!records.length) return;
     const target = Math.max(
       0,
@@ -2537,7 +2537,11 @@ export class ArchiveScene {
       this.rail = { value: SELECTED_ROW_ANCHOR_Z - chosen.z, velocity: 0 };
       this.shoulder = { value: this.selectedCell.row, velocity: 0 };
       this.laneFocus = { value: this.selectedCell.lane, velocity: 0 };
-      this.slotUnderlights.select(this.selectedCell, true);
+      this.slotUnderlights.select(this.selectedCell, !options.animate);
+      if (options.animate) {
+        this.lift = { value: 0, velocity: 0 };
+        this.emitPulse(this.selectedCell);
+      }
       if (this.fixedDetailCameraHeld) {
         this.fixedDetailLiftTarget = INSPECTION_LIFT;
         this.fixedDetailTargetPose = undefined;

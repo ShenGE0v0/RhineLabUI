@@ -16,7 +16,7 @@ export class StartupGate {
     const { root } = options;
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-modal", "true");
-    root.setAttribute("aria-label", "进入 AI 作品档案终端");
+    root.setAttribute("aria-label", "进入 DeepDemos 档案终端");
     root.insertAdjacentHTML("beforeend", '<div class="entry-controls"><button class="entry-start" disabled>正在准备终端…</button><button class="entry-silent" hidden>关闭音乐并进入</button><p class="entry-status" role="status">资源就绪后即可进入</p></div>');
     this.button = root.querySelector<HTMLButtonElement>(".entry-start")!;
     this.musicOff = root.querySelector<HTMLButtonElement>(".entry-silent")!;
@@ -48,7 +48,7 @@ export class StartupGate {
     this.options.root.dataset.entry = "waiting";
     this.button.disabled = false;
     this.button.textContent = "点击进入 →";
-    this.options.root.querySelector(":scope > span")!.textContent = "DEMO ARCHIVE / READY";
+    this.options.root.querySelector(":scope > span")!.textContent = "DEEPDEMOS / READY";
     this.status.textContent = "轻触屏幕或按 Enter 开始";
     this.button.focus({ preventScroll: true });
   }

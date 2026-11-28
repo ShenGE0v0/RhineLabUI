@@ -22,11 +22,12 @@
 :is([data-layout="compact"], [data-layout="portrait"]) .model-votes-bar-count { font-size: 12px; }
 :is([data-layout="compact"], [data-layout="portrait"]) .model-votes-chevron { font-size: 11px; }
 :is([data-layout="compact"], [data-layout="portrait"]) .model-vote-name { font-size: 12.5px; }
-:is([data-layout="compact"], [data-layout="portrait"]) .model-vote-count { font-size: 12px; }
-:is([data-layout="compact"], [data-layout="portrait"]) .model-vote-score { font-size: 11px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-vote-sep { font-size: 11.5px; margin-right: 2px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-vote-score { font-size: 12px; }
+:is([data-layout="compact"], [data-layout="portrait"]) .model-vote-count { font-size: 11px; }
 [data-layout="compact"] .clean-archive-title { max-width: calc(100% - 2 * var(--edge) - 278px); }
 [data-layout="compact"] .model-votes { top: var(--top-edge); left: var(--edge); width: fit-content; max-width: calc(100% - 2 * var(--edge) - 200px); }
-[data-layout="compact"] .model-votes-grid { width: 244px; gap: 10px; padding-top: 10px; }
+[data-layout="compact"] .model-votes-grid { width: max-content; max-width: min(268px, 100%); gap: 8px; padding: 8px 0 4px; }
 :is([data-layout="compact"], [data-layout="portrait"]) .key { display: none; }
 
 /* Portrait keeps the specimen above an independently scrollable document. */
@@ -34,7 +35,7 @@
 [data-layout="portrait"] .clean-archive-cover { top: calc(var(--top-edge) + 26px); width: min(148px, 38vw); }
 [data-layout="portrait"] .model-votes { top: auto; bottom: var(--bottom-edge, 12px); left: var(--edge); width: fit-content; max-width: calc(100% - 2 * var(--edge)); }
 [data-layout="portrait"] .model-votes-layout { flex-direction: column-reverse; }
-[data-layout="portrait"] .model-votes-grid { width: min(252px, calc(100vw - 2 * var(--edge))); padding: 0 0 8px; gap: 9px; }
+[data-layout="portrait"] .model-votes-grid { width: max-content; max-width: min(276px, calc(100vw - 2 * var(--edge))); padding: 0 0 8px; gap: 8px; }
 [data-layout="portrait"] .archive-atmosphere::before { background: linear-gradient(180deg, rgb(var(--archive-mist-rgb)), transparent 29%, transparent 46%, rgba(var(--archive-mist-rgb), .8) 65%, rgb(var(--archive-mist-rgb)) 82%); }
 
 /* Dialogs remain inside the visual viewport when a software keyboard opens. */
@@ -57,14 +58,16 @@
 :is([data-layout="compact"], [data-layout="portrait"]) .result-name > b { font-size: 12px; flex-basis: 48px; }
 :is([data-layout="compact"], [data-layout="portrait"]) .search-results { height: auto; overflow: visible; }
 :is([data-layout="compact"], [data-layout="portrait"]) .modal-bottom { position: static; margin-top: 22px; gap: 12px; font-size: 8px; flex-wrap: wrap; }
-:is([data-layout="compact"], [data-layout="portrait"]) .toast { max-width: calc(100% - 40px); width: max-content; font-size: 13px; bottom: 52px; }
+[data-layout="compact"] .toast { bottom: calc(var(--bottom-edge, 12px) + 52px); max-width: calc(100% - 2 * var(--edge)); font-size: 13px; white-space: normal; }
+[data-layout="portrait"] .toast { top: auto; bottom: calc(var(--bottom-edge, 12px) + 52px); left: 50%; transform: translateX(-50%); max-width: calc(100% - 2 * var(--edge)); font-size: 12.5px; text-align: center; white-space: normal; }
 
 @media (max-height: 460px) {
   [data-layout="compact"] .model-votes { --stack-step: 25px; --flyer-size: 20px; }
   [data-layout="compact"] .model-votes-bar { min-height: 28px; }
   [data-layout="compact"] .model-vote-provider-img { width: 18px; height: 18px; }
-  [data-layout="compact"] .model-votes-grid { gap: 6px; padding-top: 6px; }
+  [data-layout="compact"] .model-votes-grid { gap: 6px; padding: 6px 0 4px; }
   [data-layout="compact"] .model-vote-name { font-size: 11.5px; }
+  [data-layout="compact"] .model-vote-sep { font-size: 10.5px; }
   [data-layout="compact"] :is(.model-vote-score, .model-vote-count) { font-size: 10.5px; }
 }
 
@@ -79,8 +82,9 @@
   [data-layout="portrait"] .model-vote-provider-img { width: 19px; height: 19px; }
   [data-layout="portrait"] .model-votes-bar { gap: 8px; }
   [data-layout="portrait"] .model-votes-bar-meta { font-size: 12px; }
-  [data-layout="portrait"] .model-votes-grid { width: min(236px, calc(100vw - 2 * var(--edge))); gap: 8px; }
-  [data-layout="portrait"] .model-vote-item { gap: 6px; }
+  [data-layout="portrait"] .model-votes-grid { width: max-content; max-width: min(264px, calc(100vw - 2 * var(--edge))); gap: 7px; }
+  [data-layout="portrait"] .model-vote-row { gap: 6px; }
   [data-layout="portrait"] .model-vote-name { font-size: 11.5px; }
+  [data-layout="portrait"] .model-vote-sep { font-size: 10.5px; }
   [data-layout="portrait"] :is(.model-vote-score, .model-vote-count) { font-size: 10.5px; }
 }

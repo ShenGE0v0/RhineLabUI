@@ -1,5 +1,12 @@
 import content from "../content/archives.json" with { type: "json" };
+import { modelProvider, type ModelProvider } from "./model-provider.ts";
 import type { ModelVotePayload } from "./model-votes-data.ts";
+
+export interface ArchiveModelSortTarget {
+  id: string;
+  name: string;
+  provider?: ModelProvider;
+}
 
 export interface ArchiveCardStats {
   sample?: string;
@@ -71,7 +78,7 @@ export interface ArchiveDatasetSnapshot {
 }
 
 export type ArchiveDataChangeEvent = { version: number; datasetVersion: number } & (
-  | { kind: "replace" | "cover-resolver" }
+  | { kind: "replace" | "cover-resolver" | "reorder" }
   | {
       kind: "update";
       updatedIndex: number;
@@ -295,6 +302,9 @@ let datasetVersion = 0;
 let slotStride = 32;
 let laneFilesCache: number[][] = [];
 let locationCache: Array<{ lane: number; row: number; slot: number }> = [];
+let baseRecordsOrder: ArchiveRecord[] = [];
+let baseColumnsOrder: string[] = [];
+let activeModelSortId: string | null = null;
 let globalCoverResolver: ArchiveCoverResolver | null = null;
 let datasetCoverResolver: ArchiveCoverResolver | null | undefined;
 let bookmarkScope: string | null = null;
@@ -387,9 +397,122 @@ export function setArchiveDataset(
   bookmarkScope = normalized.bookmarkScope ? `external:${normalized.bookmarkScope}` : null;
   stableRecordIds = normalized.stableIds;
   rebuildIndexCaches();
+  baseRecordsOrder = [...records];
+  baseColumnsOrder = [...archiveColumns];
+  activeModelSortId = null;
   datasetVersion = ++dataVersion;
   emitDataChange({ kind: "replace", version: dataVersion, datasetVersion });
   return getArchiveDatasetSnapshot();
+}
+
+function normalizeModelKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function modelMatchTier(
+  record: ArchiveRecord,
+  target: ArchiveModelSortTarget,
+  targetKey: string,
+  targetProvider: ModelProvider | undefined,
+): 0 | 1 | 2 {
+  if (targetKey && normalizeModelKey(record.en) === targetKey) {
+    return 0;
+  }
+  const resolvedTargetProvider = targetProvider ?? modelProvider(target.name);
+  if (
+    resolvedTargetProvider &&
+    modelProvider(record.en) === resolvedTargetProvider
+  ) {
+    return 1;
+  }
+  return 2;
+}
+
+export function getActiveModelSortId(): string | null {
+  return activeModelSortId;
+}
+
+export function sortArchiveByModel(target: ArchiveModelSortTarget | null): {
+  activeId: string | null;
+  matchCount: number;
+  changed: boolean;
+} {
+  if (target === null) {
+    if (activeModelSortId === null) {
+      return { activeId: null, matchCount: 0, changed: false };
+    }
+    records.splice(0, records.length, ...baseRecordsOrder);
+    archiveColumns.splice(0, archiveColumns.length, ...baseColumnsOrder);
+    activeModelSortId = null;
+    rebuildIndexCaches();
+    dataVersion++;
+    emitDataChange({ kind: "reorder", version: dataVersion, datasetVersion });
+    return { activeId: null, matchCount: records.length, changed: true };
+  }
+
+  const targetKey = normalizeModelKey(target.name);
+  const scored = baseRecordsOrder.map((record, index) => ({
+    record,
+    index,
+    tier: modelMatchTier(record, target, targetKey, target.provider),
+  }));
+  const matchCount = scored.reduce(
+    (sum, item) => sum + (item.tier < 2 ? 1 : 0),
+    0,
+  );
+  if (matchCount === 0) {
+    return { activeId: activeModelSortId, matchCount: 0, changed: false };
+  }
+
+  const colStats = new Map<
+    string,
+    { bestTier: number; matchCount: number; recordCount: number; order: number }
+  >();
+  baseColumnsOrder.forEach((col, order) => {
+    colStats.set(col, { bestTier: 2, matchCount: 0, recordCount: 0, order });
+  });
+  for (const item of scored) {
+    let stat = colStats.get(item.record.category);
+    if (!stat) {
+      stat = { bestTier: 2, matchCount: 0, recordCount: 0, order: colStats.size };
+      colStats.set(item.record.category, stat);
+    }
+    stat.recordCount++;
+    if (item.tier < stat.bestTier) stat.bestTier = item.tier;
+    if (item.tier < 2) stat.matchCount++;
+  }
+
+  const sortedColumns = [...colStats.entries()]
+    .filter(([, stat]) => stat.recordCount > 0)
+    .sort(([, a], [, b]) => {
+      if (a.bestTier !== b.bestTier) return a.bestTier - b.bestTier;
+      if (a.matchCount !== b.matchCount) return b.matchCount - a.matchCount;
+      return a.order - b.order;
+    })
+    .map(([col]) => col);
+
+  const colRank = new Map<string, number>();
+  sortedColumns.forEach((col, rank) => colRank.set(col, rank));
+
+  scored.sort((a, b) => {
+    const rankA = colRank.get(a.record.category) ?? 0;
+    const rankB = colRank.get(b.record.category) ?? 0;
+    if (rankA !== rankB) return rankA - rankB;
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    return a.index - b.index;
+  });
+
+  records.splice(
+    0,
+    records.length,
+    ...scored.map((item) => item.record),
+  );
+  archiveColumns.splice(0, archiveColumns.length, ...sortedColumns);
+  activeModelSortId = target.id;
+  rebuildIndexCaches();
+  dataVersion++;
+  emitDataChange({ kind: "reorder", version: dataVersion, datasetVersion });
+  return { activeId: activeModelSortId, matchCount, changed: true };
 }
 
 export function updateArchiveRecord(
@@ -420,6 +543,10 @@ export function updateArchiveRecord(
   const next = normalizeRecord(mergedInput, index, usedIds, current.category);
   const categoryChanged = next.category !== current.category;
   records[index] = next;
+  const baseIdx = baseRecordsOrder.findIndex((item) => item.id === current.id);
+  if (baseIdx >= 0) {
+    baseRecordsOrder[baseIdx] = next;
+  }
   if (next.id !== current.id) {
     stableRecordIds.delete(current.id);
     if (next.id === cleanText(patch.id)) stableRecordIds.add(next.id);
@@ -429,6 +556,9 @@ export function updateArchiveRecord(
   if (categoryChanged) {
     if (!archiveColumns.includes(next.category)) {
       archiveColumns.push(next.category);
+    }
+    if (!baseColumnsOrder.includes(next.category)) {
+      baseColumnsOrder.push(next.category);
     }
     if (!categories.includes(next.category)) {
       categories.push(next.category);

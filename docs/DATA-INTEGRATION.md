@@ -108,16 +108,17 @@ await window.rhine.loadData("/api/works", {
   - `rhine.setModelVotes(listOrNull)`：传入 `ModelVoteInput[]` 或 `{ items: ModelVoteInput[] }` 实时更新榜单；传 `null` 恢复内置演示榜单。
   - `rhine.getModelVotes()`：获取当前规范化榜单只读副本。
   - `rhine.setModelVotesOpen(open)`：手动展开（`true`）或折叠（`false`）面板。
+  - `rhine.sortByModel(idOrNameOrNull)`：按指定模型 `id` 或名称将三维阵列重排为该模型作品优先（同点击榜单行效果），再次传入同 ID 或传 `null` 恢复默认排序，期间保留当前收藏作用域。
   - 变更事件：每次更新向 `window` 派发 `rhine:model-votes-change`（`event.detail` 为最新数组）。
 
 | `ModelVoteInput` 字段 | 必填 | 默认值 / 说明 |
 | --- | --- | --- |
 | `name` | 是 | 模型名称，如 `"DS-FV-0831"` |
-| `votes` | 是 | 票数（非负有限数字，取整后显示为 `63 票`） |
+| `votes` | 是 | 票数（非负有限数字，取整后紧跟评分显示为 `× 4.82(63)`，无评分时回退为 `63 票`） |
 | `provider` | 否 | 厂商图标 key（`deepseek`、`anthropic` 等）；不传时根据 `name` 自动匹配，显式传 `null` 强制显示首字母徽标 |
-| `providerLabel` | 否 | 厂商名称，缺省根据 `provider` 映射，未匹配时回退 `"未标厂商"`（保留在 `ModelVoteEntry` / `getModelVotes()` 中，当前无底紧凑榜单仅直接渲染图标、模型名与右侧票数／评分） |
+| `providerLabel` | 否 | 厂商名称，缺省根据 `provider` 映射，未匹配时回退 `"未标厂商"`（保留在 `ModelVoteEntry` / `getModelVotes()` 中，当前无底紧凑榜单仅直接渲染图标、模型名与右侧单行评分票数） |
 | `works` | 否 | 关联作品数（非负有限数字，取整保留在 `ModelVoteEntry` / `getModelVotes()` 中供宿主读取，当前榜单视图不显示副标题行） |
-| `score` | 否 | 评分（`0–10` 有限数字，保留 2 位小数展示为 `4.82`） |
+| `score` | 否 | 评分（`0–10` 有限数字，保留 2 位小数以墨绿色紧随模型名后与暖灰括号票数紧凑同排展示为 `× 4.82(63)`） |
 | `id` | 否 | 唯一标识，缺省根据 `name` 自动生成 |
 
-另可通过 `rhine.stats().modelVotes` 读取面板当前运行状态 `{ phase, expanded, count }`。
+另可通过 `rhine.stats().modelVotes` 读取面板当前运行状态 `{ phase, expanded, count, activeSort }`。

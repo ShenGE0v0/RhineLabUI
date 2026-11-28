@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  archiveColumns,
+  getActiveModelSortId,
+  getArchiveBookmarkScope,
+  records,
+  sortArchiveByModel,
+} from "../src/data.ts";
+import {
   DEFAULT_MODEL_VOTES,
   getModelVotes,
   normalizeModelVotes,
@@ -93,4 +100,55 @@ test("rejects malformed or empty payloads", () => {
   assert.throws(() =>
     normalizeModelVotes({ items: [{ name: "   ", votes: 10 }] }),
   );
+});
+
+test("sortArchiveByModel reorders records and columns reversibly without altering bookmark scope", () => {
+  const originalIds = records.map((r) => r.id);
+  const originalColumns = [...archiveColumns];
+  const originalScope = getArchiveBookmarkScope();
+  try {
+    const dsRes = sortArchiveByModel({
+      id: "ds-fv-0831",
+      name: "DS-FV-0831",
+      provider: "deepseek",
+    });
+    assert.equal(dsRes.changed, true);
+    assert.equal(dsRes.activeId, "ds-fv-0831");
+    assert.equal(dsRes.matchCount, 17);
+    assert.equal(records[0].en, "DS-FV-0831");
+    assert.equal(getActiveModelSortId(), "ds-fv-0831");
+    assert.equal(getArchiveBookmarkScope(), originalScope);
+
+    const gptRes = sortArchiveByModel({
+      id: "gpt-6.2-astra",
+      name: "GPT 6.2 ASTRA",
+      provider: "openai",
+    });
+    assert.equal(gptRes.changed, true);
+    assert.equal(gptRes.activeId, "gpt-6.2-astra");
+    assert.equal(gptRes.matchCount, 3);
+    assert.equal(records[0].en, "GPT-ASTRA");
+
+    const emptyRes = sortArchiveByModel({
+      id: "qwen3.8-max",
+      name: "QWEN3.8-MAX",
+      provider: "alibaba",
+    });
+    assert.equal(emptyRes.changed, false);
+    assert.equal(emptyRes.matchCount, 0);
+    assert.equal(getActiveModelSortId(), "gpt-6.2-astra");
+
+    const resetRes = sortArchiveByModel(null);
+    assert.equal(resetRes.changed, true);
+    assert.equal(resetRes.activeId, null);
+    assert.equal(getActiveModelSortId(), null);
+    assert.deepEqual(
+      records.map((r) => r.id),
+      originalIds,
+    );
+    assert.deepEqual([...archiveColumns], originalColumns);
+    assert.equal(getArchiveBookmarkScope(), originalScope);
+  } finally {
+    sortArchiveByModel(null);
+  }
 });
