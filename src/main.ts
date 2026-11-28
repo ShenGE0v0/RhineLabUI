@@ -25,6 +25,7 @@ import {
   getArchiveDatasetVersion,
   hasStableArchiveId,
   resolveRecordCover,
+  resolveRecordPrompt,
   setArchiveDataset,
   setCoverResolver,
   sortArchiveByModel,
@@ -54,7 +55,6 @@ import {
 import { BlockDissolveTitle } from "./block-dissolve-title";
 import { CleanCoverPreview } from "./clean-cover-preview";
 import { MistDissolveToast } from "./mist-dissolve-toast";
-import { TerminalAudio } from "./audio";
 import {
   createMotionPreferences,
   motionEnabled,
@@ -78,6 +78,18 @@ $("#stage").innerHTML = `
   <div id="clean-archive-cover" class="clean-archive-cover" aria-hidden="true" data-visible="false"></div>
   <aside id="model-votes-panel" class="model-votes" aria-label="模型票数排行" data-phase="hidden"></aside>
   <div id="clean-title-live" class="clean-title-live" aria-live="polite" aria-atomic="true"></div>
+  <div id="detail-access" class="detail-access" hidden>
+    <button id="detail-access-toggle" type="button" aria-expanded="false" aria-controls="detail-access-content">查看详情</button>
+    <section id="detail-access-content" tabindex="0" aria-labelledby="detail-access-title" hidden>
+      <h2 id="detail-access-title"></h2>
+      <p id="detail-access-meta"></p>
+      <h3>描述</h3><p id="detail-access-description"></p>
+      <h3>第一轮提示词</h3><p id="detail-access-prompt"></p>
+      <button id="detail-access-copy" type="button">复制提示词</button>
+      <h3>档案记录</h3><p id="detail-access-findings"></p>
+      <a id="detail-access-source" target="_blank" rel="noopener noreferrer">打开原作品 ↗</a>
+    </section>
+  </div>
   <div id="pwa-update-notice" class="pwa-update-notice" role="status" hidden><span>新版本已就绪</span><button data-pwa-action="update">更新并重启 ↻</button></div>
   <div id="modal-root"></div><div id="toast" class="toast" role="status"></div>
   <div id="loading" class="loading"><div class="loading-mark" role="img" aria-label="DeepDemos — AI Demo Archive">${logo}</div><span>CONNECTING TO DEEPDEMOS</span><i></i></div>
@@ -99,6 +111,11 @@ let modalTransition: SurfaceTransition | undefined;
 let modalClosing = false;
 let modalSiblings: { node: HTMLElement; inert: boolean }[] = [];
 let pendingDetailFocus = false;
+const detailAccess = $("#detail-access");
+const detailAccessToggle = $<HTMLButtonElement>("#detail-access-toggle");
+const detailAccessContent = $("#detail-access-content");
+const detailAccessCopy = $<HTMLButtonElement>("#detail-access-copy");
+const detailAccessSource = $<HTMLAnchorElement>("#detail-access-source");
 function readLocal<T>(key: string, fallback: T): T {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
@@ -147,8 +164,6 @@ function loadDatasetBookmarks() {
 loadDatasetBookmarks();
 const storedPrefs = readLocal<
   Partial<{
-    music: boolean;
-    musicVolume: number;
     reduced: boolean;
     quality: boolean;
     rendering: RenderQuality;
@@ -166,8 +181,6 @@ const initialMotion = createMotionPreferences(
 );
 const initialMotionPreset = motionPresetFor(initialMotion);
 const prefs = {
-  music: storedPrefs.music ?? true,
-  musicVolume: storedPrefs.musicVolume ?? 0.5,
   motion: initialMotion,
   motionPreset: initialMotionPreset,
   quality: storedPrefs.quality ?? true,
@@ -306,34 +319,15 @@ function syncCleanCover(
     animated,
   });
 }
-const audio = new TerminalAudio();
-function configureAudio() {
-  audio.configure(prefs);
-}
-configureAudio();
 const reviewEntry = reviewParams.has("scene");
-if (reviewEntry) audio.prepareContext();
 let started = false;
 const loading = $("#loading");
 // The entry screen uses the actual viewport, including portrait phones.
 $("#viewport").append(loading);
 $("#stage").inert = true;
-const entry =
-  !reviewEntry && prefs.music
-    ? new StartupGate({
-        root: loading,
-        unlock: () => audio.unlock(),
-        cancel: () => audio.cancelEntry(),
-        start: (musicDisabled) => completeStartup(musicDisabled),
-      })
-    : undefined;
-if (entry) {
-  audio.holdForEntry();
-  if (prefs.music)
-    void audio.prepareMusic().catch(() => {
-      /* Entry offers retry. */
-    });
-}
+const entry = reviewEntry
+  ? undefined
+  : new StartupGate({ root: loading, start: () => completeStartup() });
 let scene: ArchiveScene | undefined;
 let columnMemory: number[] = [];
 function rebuildColumnMemory() {
@@ -343,10 +337,6 @@ function rebuildColumnMemory() {
   }
 }
 rebuildColumnMemory();
-function saveAudioPrefs() {
-  writeLocal("rhine-settings", prefs);
-  configureAudio();
-}
 function superPerformanceEnabled() {
   return prefs.superPerformance;
 }
@@ -354,7 +344,7 @@ function effectiveRenderQuality() {
   return superPerformanceEnabled() ? superPerformanceQuality : prefs.rendering;
 }
 function savePrefs() {
-  saveAudioPrefs();
+  writeLocal("rhine-settings", prefs);
   if (!motionActive("rollingText")) {
     cleanTitle.finish();
   }
@@ -433,6 +423,45 @@ function focusArchiveOverview() {
   $("#three-scene").focus({ preventScroll: true });
 }
 
+function syncDetailAccess() {
+  const record = records[selected];
+  detailAccess.hidden = mode !== "detail" || !record;
+  if (detailAccess.hidden) return;
+  const open = scene?.isDetailCardOpen ?? false;
+  detailAccessToggle.textContent = open ? "收起详情" : "查看详情";
+  detailAccessToggle.setAttribute("aria-expanded", String(open));
+  if (!open && detailAccessContent.contains(document.activeElement)) {
+    detailAccessToggle.focus({ preventScroll: true });
+  }
+  detailAccessContent.hidden = !open;
+  if (!open) {
+    detailAccessContent.scrollTop = 0;
+    return;
+  }
+  const prompt = resolveRecordPrompt(record);
+  $("#detail-access-title").textContent = record.title;
+  $("#detail-access-meta").textContent = [record.id, record.category, record.date, record.en].join(" · ");
+  $("#detail-access-description").textContent = record.abstract;
+  $("#detail-access-prompt").textContent = prompt || "暂无首轮提示词。";
+  $("#detail-access-findings").textContent = record.findings.join("\n");
+  const source = /^https?:/i.test(record.source) ? record.source : "";
+  if (
+    (!prompt && document.activeElement === detailAccessCopy) ||
+    (!source && document.activeElement === detailAccessSource)
+  ) {
+    detailAccessContent.focus({ preventScroll: true });
+  }
+  detailAccessCopy.hidden = !prompt;
+  detailAccessSource.hidden = !source;
+  if (source) detailAccessSource.href = source;
+  else detailAccessSource.removeAttribute("href");
+}
+detailAccessToggle.addEventListener("click", () => {
+  if (scene) scene.setDetailCardOpen(!scene.isDetailCardOpen);
+});
+detailAccessCopy.addEventListener("click", () => void scene?.copyDetailPrompt());
+detailAccess.addEventListener("focusin", () => { pendingDetailFocus = false; });
+
 function setMode(next: Mode) {
   const previousMode = mode;
   if (next !== "archive") {
@@ -441,7 +470,6 @@ function setMode(next: Mode) {
     cleanTitle.finish();
   }
   mode = next;
-  audio.setScene(next);
   $("#stage").dataset.mode = next;
   if (previousMode !== next) fit();
   if (next === "archive" && previousMode !== "archive") {
@@ -454,6 +482,7 @@ function setMode(next: Mode) {
     if (!modal && next === "archive") focusArchiveOverview();
   }
   scene?.setMode(next);
+  syncDetailAccess();
   if (started) {
     const surfaceMotion = motionActive("surfaceTransitions");
     cleanTitle.setArchiveVisible(next === "archive", surfaceMotion);
@@ -494,6 +523,7 @@ function updateSelection(
   hoveredIndex = null;
   syncCleanTitle(animate && motionActive("rollingText") && mode === "archive", true);
   syncCleanCover(animate && motionActive("surfaceTransitions") && mode === "archive");
+  syncDetailAccess();
 }
 function openFile() {
   if (!ready) return;
@@ -642,7 +672,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (modal) closeModal();
     else if (mode === "detail") {
-      setMode("archive");
+      if (scene?.isDetailCardOpen) {
+        scene.setDetailCardOpen(false);
+      } else {
+        setMode("archive");
+      }
     }
     return;
   }
@@ -678,6 +712,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     openModal("saved");
   }
+  if (detailAccess.contains(document.activeElement)) return;
   if (e.key === "ArrowLeft") {
     e.preventDefault();
     stepColumn(-1);
@@ -700,6 +735,10 @@ document.addEventListener("keydown", (e) => {
   ) {
     e.preventDefault();
     if (mode === "archive") openFile();
+    else if (scene) {
+      detailAccessToggle.focus({ preventScroll: true });
+      scene.setDetailCardOpen(!scene.isDetailCardOpen);
+    }
   }
 });
 
@@ -806,6 +845,39 @@ function bindScene(scene: ArchiveScene) {
         modelVotesPanel.interruptIntro();
       }
     }
+  };
+  scene.onDetailCardOpenChange = syncDetailAccess;
+  scene.onCopyPrompt = async (text) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        notify("已复制第一轮提示词");
+        return true;
+      }
+    } catch {
+      // Try the legacy clipboard path when the modern API rejects.
+    }
+    const helper = document.createElement("textarea");
+    const previousFocus = document.activeElement;
+    helper.value = text;
+    helper.readOnly = true;
+    helper.style.position = "fixed";
+    helper.style.opacity = "0";
+    document.body.append(helper);
+    let copied = false;
+    try {
+      helper.select();
+      copied = document.execCommand("copy");
+    } catch {
+      // Some browsers disallow both clipboard paths.
+    } finally {
+      helper.remove();
+      if (previousFocus instanceof HTMLElement) {
+        previousFocus.focus({ preventScroll: true });
+      }
+    }
+    notify(copied ? "已复制第一轮提示词" : "复制失败，请检查浏览器剪贴板权限");
+    return copied;
   };
 }
 
@@ -986,23 +1058,21 @@ async function start() {
     if (reviewParams.get("scene") !== "detail") await scene.warmUpOverview();
     ready = true;
     if (entry) entry.ready();
-    else completeStartup(false);
+    else completeStartup();
   } catch (error) {
     bootstrapRequest?.abort();
     bootstrapRequest = undefined;
     console.error(error);
-    $("#loading").innerHTML =
-      '<div class="error-state"><strong>CONNECTION INTERRUPTED</strong><p>三维档案资源未能载入。请确认浏览器已启用硬件加速，然后重新连接。</p><button onclick="location.reload()">RECONNECT →</button></div>';
+    const reason =
+      error instanceof Error && error.message
+        ? error.message
+        : String(error ?? "未知错误");
+    $("#loading").innerHTML = `<div class="error-state"><strong>CONNECTION INTERRUPTED</strong><p>三维档案资源未能载入。请确认浏览器已启用硬件加速，然后重新连接。</p><p class="error-detail">${escapeHtml(reason)}</p><button onclick="location.reload()">RECONNECT →</button></div>`;
   }
 }
-function completeStartup(musicDisabled: boolean) {
+function completeStartup() {
   if (started || !ready) return;
   started = true;
-  if (musicDisabled) {
-    prefs.music = false;
-    saveAudioPrefs();
-  }
-  audio.releaseEntry();
   const fade = motionActive("surfaceTransitions") ? 600 : 0;
   setMode(reviewParams.get("scene") === "detail" ? "detail" : "archive");
   // Place the grid in frame immediately and play the 4-stage overview entrance.
@@ -1030,7 +1100,7 @@ function completeStartup(musicDisabled: boolean) {
   if (reviewParams.get("scene") !== "detail") {
     setTimeout(() => prewarmDatasetProviders(), 3500);
   }
-  // Do not compete with entry audio/font downloads or the 3.2 s overview
+  // Do not compete with font downloads or the 3.2 s overview
   // intro animation. Full offline installation begins once settled.
   setTimeout(() => void initPwa(notify), 4500);
 }
@@ -1042,6 +1112,7 @@ enableGamepad();
 const rhine = {
     archive: () => setMode("archive"),
     detail: () => openFile(),
+    setDetailCardOpen: (open: boolean) => scene?.setDetailCardOpen(Boolean(open)),
     select: (i: number) => {
       if (!records.length || !Number.isFinite(i)) return;
       select(i);
@@ -1099,7 +1170,6 @@ const rhine = {
       selected: records[selected]?.id ?? "",
       saved: [...saved],
       modelVotes: modelVotesPanel.stats(),
-      audio: audio.stats(),
     }),
 };
 declare global {
@@ -1118,5 +1188,4 @@ if (import.meta.hot)
     cleanCover.dispose();
     toast.dispose();
     modelVotesPanel.dispose();
-    audio.dispose();
   });

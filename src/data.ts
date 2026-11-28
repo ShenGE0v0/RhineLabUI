@@ -24,6 +24,7 @@ export interface ArchiveRecord {
   lead: string;
   clearance: string;
   abstract: string;
+  prompt?: string;
   findings: string[];
   source: string;
   cover?: string;
@@ -40,6 +41,7 @@ export interface ArchiveRecordInput {
   lead?: string;
   clearance?: string;
   abstract?: string;
+  prompt?: string | null;
   findings?: string[];
   source?: string;
   cover?: string | null;
@@ -183,6 +185,8 @@ function normalizeRecord(
   const category =
     rawCategory === ALL_CATEGORY_LABEL ? fallbackCategory : rawCategory;
 
+  const prompt = cleanText(input.prompt);
+
   return {
     id,
     title: cleanText(input.title, "未命名作品"),
@@ -193,6 +197,7 @@ function normalizeRecord(
     lead: cleanText(input.lead, "anonymous"),
     clearance: cleanText(input.clearance, "WEB"),
     abstract: cleanText(input.abstract, "暂无作品简介。"),
+    ...(prompt ? { prompt } : {}),
     findings,
     source: sanitizeHttpUrl(input.source),
     cover: sanitizeCover(input.cover),
@@ -602,6 +607,10 @@ export function resolveRecordCover(
     console.warn("[archive] coverResolver 执行失败，回退原始封面地址。", error);
     return record.cover;
   }
+}
+
+export function resolveRecordPrompt(record: ArchiveRecord | undefined): string {
+  return record?.prompt?.trim() ?? "";
 }
 
 export function getArchiveDataVersion() {

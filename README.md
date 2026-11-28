@@ -37,7 +37,7 @@ npm run preview
 
 ## 浏览档案
 
-- **网页纯净画布模式**：用方向键、滚轮或拖动阵列切列、翻档；指针悬停卡片时产生 3D 微抬并预选，选中卡片在卡匣正面展示作品标题、生成模型名、厂商图标、展示图、互动统计、刻录日期与 Code 39 条码。按 `Enter` 或双击展开选中卡片（长焦推进至 3/4 正面特写，保持磨砂卡匣质感），按 `Esc` 返回阵列。
+- **网页纯净画布模式**：用方向键、滚轮或拖动阵列切列、翻档；指针悬停卡片时产生 3D 微抬并预选，选中卡片在卡匣正面展示作品标题、生成模型名、厂商图标、展示图、互动统计，以及右上角的 3D 工业模切贴纸（作品描述预览）。按 `Enter` 或双击展开选中卡片（长焦推进至 3/4 正面特写，保持磨砂卡匣质感），从右侧抽出的详情卡可阅读完整描述和已收录的第一轮提示词，按 `Esc` 依次收起详情卡、返回阵列。
 - **快捷检索**：按 `/` 打开检索，可按作品名、编号、模型名或分类查找档案。原作链接和下载文本可在[档案数据](content/archives.json)及 [TXT 目录](public/archives/)中查阅。
 
 ## 修改档案
@@ -55,4 +55,4 @@ npm run preview
 
 - 上游为 **LBEILC / RhineLabUI**，保留 `Copyright (c) 2026 LBEILC` 和 [MIT 许可证](LICENSE)。此前引入的渲染优化保留 [PR #15 贡献署名](docs/PR15-ATTRIBUTION.md)。
 - 档案所引用的作品版权归原作者所有。厂商图标来自 Lobe Icons，品牌标志的权利归各自权利人所有。[图标来源与许可](public/licenses/lobe-icons.txt)
-- 字体、数字滚动组件和配乐的来源与许可见 [MiSans](public/fonts/MiSans-license.pdf)、[Rolling Number](public/licenses/rolling-number.txt) 和 [音频说明](public/audio/README.md)。
+- 字体与数字滚动组件的来源与许可见 [MiSans](public/fonts/MiSans-license.pdf) 和 [Rolling Number](public/licenses/rolling-number.txt)。

@@ -11,6 +11,8 @@ import { escapeHtml } from "../src/html.ts";
 import {
   getArchiveBookmarkScope,
   hasStableArchiveId,
+  normalizeArchiveDataset,
+  resolveRecordPrompt,
   setArchiveDataset,
   subscribeArchiveData,
   updateArchiveRecord,
@@ -22,6 +24,15 @@ import {
 } from "../src/data-source.ts";
 
 const content = await loadContent();
+test("detail prompts use only the original text supplied by the dataset", () => {
+  const { records } = normalizeArchiveDataset([
+    { title: "Missing", abstract: "A short description" },
+    { title: "Present", prompt: "  first line\nsecond line  " },
+    { title: "Cleared", prompt: null },
+  ]);
+  assert.deepEqual(records.map(resolveRecordPrompt), ["", "first line\nsecond line", ""]);
+});
+
 test("all forty downloads match the shared content, including the UTF-8 BOM", async () => {
   for (const record of content.records) {
     assert.equal(

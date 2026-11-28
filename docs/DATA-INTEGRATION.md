@@ -88,10 +88,11 @@ await window.rhine.loadData("/api/works", {
 | `en` | 否 | 生成模型名，默认 `"未标注"`（用于匹配 `public/assets/model-providers/*.svg` 图标） |
 | `category` | 否 | 所属分类 / 所在列，缺省归入首列或 `"默认分类"` |
 | `department` | 否 | 来源/平台，默认 `"未标注"` |
-| `date` | 否 | 刻录/收录日期（用于右上角 `刻录时间` 与 Code 39 条码），默认 `"0000-00-00"` |
+| `date` | 否 | 刻录/收录日期（显示在抽出详情卡的元数据行），默认 `"0000-00-00"` |
 | `lead` | 否 | 作者名，默认 `"anonymous"` |
 | `clearance` | 否 | 类型标签，默认 `"WEB"` |
 | `abstract` | 否 | 简介，默认 `"暂无作品简介。"` |
+| `prompt` | 否 | 原始第一轮提示词。可传 `null` 清除。缺省时详情卡显示「暂无首轮提示词」，并隐藏复制动作。 |
 | `findings` | 否 | 补充记录数组，缺省自动补一条模型说明 |
 | `source` | 否 | 原页链接，仅允许 `http:` / `https:`，非法协议自动置空 |
 | `cover` | 否 | 封面路径（`public/` 下同源相对路径如 `assets/covers/...`、源站根路径如 `/api/cover-proxy?url=...`、`data:image/*`、`blob:` 或支持 CORS 的 `http(s):` URL） |

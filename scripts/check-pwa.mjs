@@ -9,7 +9,7 @@ const {chromium}=await import(process.env.PLAYWRIGHT_MODULE?pathToFileURL(resolv
 const metadata=JSON.parse(await readFile('dist/pwa-build.json','utf8'));
 let revision=1,fail=false;
 const root=resolve('dist');
-const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2','.txt':'text/plain','.glb':'model/gltf-binary','.ogg':'audio/ogg'};
+const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2','.txt':'text/plain','.glb':'model/gltf-binary'};
 const server=createServer(async(req,res)=>{try{
   const url=new URL(req.url,'http://localhost');const path=decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname);const file=resolve(root,`.${path}`);
   if(!file.startsWith(root+ '/'.replace('/',process.platform==='win32'?'\\':'/')))throw Error();
@@ -21,7 +21,7 @@ const server=createServer(async(req,res)=>{try{
 await new Promise(resolve=>server.listen(5191,'127.0.0.1',resolve));
 const browser=await chromium.launch({channel:'chrome',headless:true,args:['--use-angle=d3d11','--enable-gpu','--ignore-gpu-blocklist']});
 const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
-await context.addInitScript(()=>{if(!localStorage.getItem('rhine-settings'))localStorage.setItem('rhine-settings',JSON.stringify({reduced:true,music:false}))});
+await context.addInitScript(()=>{if(!localStorage.getItem('rhine-settings'))localStorage.setItem('rhine-settings',JSON.stringify({reduced:true}))});
 const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
 const ready=()=>page.waitForFunction(()=>window.rhine?.stats().ready&&document.documentElement.dataset.offlineReady==='true'&&navigator.serviceWorker.controller&&!document.querySelector('#loading'),null,{timeout:90000});
 const report={version:metadata.version,bytes:metadata.bytes,files:metadata.files.length,checks:[],errors};
@@ -42,8 +42,7 @@ try{
  assert.ok(exported.ok && exported.text.includes('FILE X-001'));
  assert.ok(await page.evaluate(async () => (await fetch('/assets/model-providers/anthropic.svg')).ok));
  await mkdir('.tools/responsive',{recursive:true});await page.screenshot({path:testScreenshotPath('responsive','pwa-offline.png')});
- assert.ok(await page.evaluate(async()=>{const r=await fetch('/audio/motif.ogg');return r.ok&&(await r.arrayBuffer()).byteLength>100000}));
- report.checks.push('offline reload, 3D card expansion, TXT, provider SVG and audio resource');
+ report.checks.push('offline reload, 3D card expansion, TXT and provider SVG');
  await context.setOffline(false);revision=2;
  await page.evaluate(async()=>{const r=await navigator.serviceWorker.getRegistration();await r.update()});
  await page.waitForFunction(async()=>Boolean((await navigator.serviceWorker.getRegistration())?.waiting),null,{timeout:90000});

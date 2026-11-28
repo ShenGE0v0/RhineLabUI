@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { ArchiveVisibility } from "./archive-visibility";
-import { ArchiveDrawCoverage, ArchiveShadowCoverage } from "./archive-draw-coverage";
+import {
+  ArchiveDrawCoverage,
+  ArchiveShadowCoverage,
+} from "./archive-draw-coverage";
 import { InstanceUpdates } from "./instance-updates";
 import { RenderState } from "./render-state";
 import { SharedDepthBokeh } from "./shared-depth";
@@ -43,14 +46,53 @@ import {
   fileLocation,
   records,
   resolveRecordCover,
+  resolveRecordPrompt,
   type ArchiveCardStats,
+  type ArchiveRecord,
 } from "./data";
+import {
+  FACE_COVER_RECT,
+  FACE_NOTE_RECT,
+  PULLOUT_CANVAS_H,
+  PULLOUT_CANVAS_W,
+  PULLOUT_CARD_H,
+  PULLOUT_CARD_W,
+  STICKER_CANVAS_H,
+  STICKER_CANVAS_W,
+  STICKER_H,
+  STICKER_LOCAL_X,
+  STICKER_LOCAL_Y,
+  STICKER_SHADOW_H,
+  STICKER_SHADOW_W,
+  STICKER_TILT_Z,
+  STICKER_W,
+  TOGGLE_CANVAS_H,
+  TOGGLE_CANVAS_W,
+  TOGGLE_LOCAL_X,
+  TOGGLE_LOCAL_Y,
+  TOGGLE_PLANE_H,
+  TOGGLE_PLANE_W,
+  drawDetailToggleTrigger,
+  drawFaceHoverAccents,
+  drawIndustrialDieCutSticker,
+  drawPulloutDetailCard,
+  drawStandaloneDetailToggle,
+  drawStickerBackMask,
+  drawStickerContactShadow,
+  hitTestDetailFace,
+  hitTestPulloutCard,
+  hitTestStickerFace,
+  type DetailHotspot,
+  type DetailSurfaceState,
+  type PulloutCardLayout,
+  type RectBox,
+  type ShowcaseStatRects,
+} from "./detail-card-surface";
 import {
   modelProvider,
   modelProviderAssetPath,
   type ModelProvider,
 } from "./model-provider";
-import { drawCode39Barcode } from "./code39";
 import {
   cellKey,
   sameCell,
@@ -66,9 +108,19 @@ import {
 } from "./archive-loop";
 import { labelMarkSvg } from "./brand";
 import { archiveFraming } from "./viewport-layout";
-import { ArchiveDrag, ArchivePlaneMomentum, type DragAxis, type DragProjection, type DragPosition } from "./archive-drag";
+import {
+  ArchiveDrag,
+  ArchivePlaneMomentum,
+  type DragAxis,
+  type DragProjection,
+  type DragPosition,
+} from "./archive-drag";
 import { assetUrl as publicAsset } from "./asset-url";
-import { fullMotion, reducedMotion, type MotionPreferences } from "./motion-preferences";
+import {
+  fullMotion,
+  reducedMotion,
+  type MotionPreferences,
+} from "./motion-preferences";
 import {
   baselineSelectionWave,
   rippleEnvelope,
@@ -79,6 +131,24 @@ import {
   INSPECTION_LIFT,
   returnStep,
 } from "./motion";
+import {
+  MIST_HIDE_DURATION_MS,
+  MIST_RETURN_DURATION_MS,
+  MIST_SWITCH_DURATION_MS,
+  clamp01,
+  easeMistReveal,
+  easeOutCubic,
+  easeOutQuad,
+} from "./mist-etch-dissolve";
+
+interface MistDissolveShaderUniforms {
+  uProgress: { value: number };
+  uHiding: { value: number };
+  uActive: { value: number };
+  uModeSwitch: { value: number };
+  uSeed: { value: number };
+  uTexelSize: { value: THREE.Vector2 };
+}
 
 function glslFloat(value: number) {
   const text = String(value);
@@ -128,11 +198,118 @@ const OVERVIEW_BADGE_SETTLE_SECONDS = 0.42;
 const HOVER_BADGE_HEIGHT = 192;
 const HOVER_BADGE_SCALE = 0.5;
 const MAX_HOVER_BADGE_CACHE = 24;
-const BURN_STAMP_RIGHT = OVERVIEW_BADGE_WIDTH - 90;
-const BURN_STAMP_WIDTH = 525;
-const BURN_STAMP_GAP = 80;
-const BURN_STAMP_TOP = 156;
-const BURN_STAMP_HEIGHT = 96;
+const HOVER_STICKER_SCALE = 0.5;
+const MAX_HOVER_STICKER_CACHE = 16;
+/** 贴纸组沿玻璃法线抬离 `glassFrontZ` 的距离（局部单位），贴纸正面据此贴附在
+ *  玻璃外侧。 */
+const STICKER_PLATE_LIFT = 0.01;
+/** 接触投影层相对贴纸组原点的局部 z；负值表示位于贴纸正面之后，取值范围必须
+ *  落在 (-STICKER_PLATE_LIFT, 0) 之内，才能既压住正面片又留在玻璃前表面之前
+ *  （当前局部 -0.0025，即玻璃前 +0.0075）。这里不使用 polygonOffset：它的斜率
+ *  项在斜视时会超过这点净距，把整片阴影推到玻璃背后并被深度测试吃掉。 */
+const STICKER_CONTACT_SHADOW_LOCAL_Z = -0.0025;
+/** 卷翘角顺序，与着色器 uPeel 的 x/y/z/w 分量及顶点变形一致：右上、右下、左下、左上。 */
+const STICKER_CORNERS: ReadonlyArray<readonly [number, number]> = [
+  [1, 1],
+  [1, -1],
+  [-1, -1],
+  [-1, 1],
+];
+/** 静置时唯一保留轻卷的角（右下）；其余三个角一开始必须完全平整。 */
+const STICKER_REST_CORNER = 1;
+/** 指针停在贴纸上时，离指针最近的角掀起到的幅度。 */
+const STICKER_HOVER_PEEL = 0.78;
+const ARCHIVAL_NOTE_GAP = 48;
+const HOVER_STICKER_SHADED_COLOR = new THREE.Color("#a89179");
+const HOVER_STICKER_LIT_COLOR = new THREE.Color("#ebe7df");
+const HOVER_STICKER_SHADED_EMISSIVE = new THREE.Color("#7f664d");
+const HOVER_STICKER_LIT_EMISSIVE = new THREE.Color("#f7f4ec");
+const DETAIL_TOGGLE_INK_COLOR = new THREE.Color("#4c4338");
+const DETAIL_TOGGLE_HOVER_COLOR = new THREE.Color("#221d17");
+
+/** 卷翘抬升幅度：0.028 的常数项在 p→0 时会让角部残留一整块抬升，用 0.1 的
+ *  包络把起落拉回零；p >= 0.1 的静置/掀起外观与旧实现完全一致。几何变形与
+ *  换角门限共用这一个公式，避免两处走散。 */
+function stickerPeelLift(peel: number) {
+  const p = THREE.MathUtils.clamp(peel, 0, 1);
+  return (0.028 + p * 0.082) * THREE.MathUtils.smoothstep(p, 0, 0.1);
+}
+
+/** GLB 首次加载可能撞上开发服务器重启或瞬时网络抖动；重试 3 次后再交给启动兜底页。 */
+async function loadGltfWithRetry(url: string, attempts = 3) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await new GLTFLoader().loadAsync(url);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, 400 * (attempt + 1)),
+        );
+      }
+    }
+  }
+  throw lastError;
+}
+
+function deformStickerGeometry(
+  geom: THREE.PlaneGeometry,
+  base: Float32Array,
+  peels: ArrayLike<number>,
+) {
+  const posAttr = geom.attributes.position as THREE.BufferAttribute;
+  const arr = posAttr.array as Float32Array;
+  const halfW = STICKER_W / 2;
+  const halfH = STICKER_H / 2;
+
+  for (let i = 0; i < arr.length; i += 3) {
+    const bx = base[i];
+    const by = base[i + 1];
+    // 一个顶点可能同时落在两个角的卷翘范围内（过渡瞬间），取抬升更大的一角。
+    let bestCurl = 0;
+    let bestSignX = 1;
+    let bestSignY = -1;
+    for (let corner = 0; corner < STICKER_CORNERS.length; corner++) {
+      const p = THREE.MathUtils.clamp(peels[corner] ?? 0, 0, 1);
+      if (p <= 0.0001) continue;
+      const signX = STICKER_CORNERS[corner][0];
+      const signY = STICKER_CORNERS[corner][1];
+      const radius = THREE.MathUtils.lerp(0.22, 0.38, p);
+      const maxLift = stickerPeelLift(p);
+      // 以该角为原点、朝纸面内侧的两条轴距。
+      const dx = halfW - signX * bx;
+      const dy = halfH - signY * by;
+      const s = dx * 0.72 + dy * 0.69;
+      if (s >= radius) continue;
+      const u = 1 - s / radius;
+      const curve = u * u * (0.45 + 0.55 * u);
+      const curlZ = maxLift * curve;
+      if (curlZ > bestCurl) {
+        bestCurl = curlZ;
+        bestSignX = signX;
+        bestSignY = signY;
+      }
+    }
+    if (bestCurl > 0) {
+      arr[i] = bx - bestSignX * bestCurl * 0.52;
+      arr[i + 1] = by - bestSignY * bestCurl * 0.52;
+      arr[i + 2] = base[i + 2] + bestCurl;
+    } else {
+      arr[i] = bx;
+      arr[i + 1] = by;
+      arr[i + 2] = base[i + 2];
+    }
+  }
+  posAttr.needsUpdate = true;
+  geom.computeVertexNormals();
+}
+
+/** 贴纸局部坐标落在哪个角：0 右上、1 右下、2 左下、3 左上。 */
+function stickerCornerAt(localX: number, localY: number): number {
+  if (localY >= 0) return localX >= 0 ? 0 : 3;
+  return localX >= 0 ? 1 : 2;
+}
 
 /** The reference is a single warm ivory family; structure is separated by
  *  value and soft shadow instead of a contrasting mint outline. */
@@ -238,7 +415,7 @@ const UNDERLIGHT_END_STRENGTH: Partial<Record<SurfaceRole, number>> = {
 };
 const UNDERLIGHT_REFLECTION_STRENGTH: Partial<Record<SurfaceRole, number>> = {
   acrylic: 0.38,
-  glass: 0.20,
+  glass: 0.2,
   frame: 0.32,
   shell: 0.14,
   edge: 0.26,
@@ -339,7 +516,10 @@ function fitOneLine(
   // The font floor is still too wide for a pathological string. Keep the
   // result inside the column instead of leaving a clip that affects later rows.
   let end = text.length;
-  while (end > 1 && context.measureText(text.slice(0, end) + "…").width > maxWidth)
+  while (
+    end > 1 &&
+    context.measureText(text.slice(0, end) + "…").width > maxWidth
+  )
     end--;
   return end > 1 ? text.slice(0, end).trimEnd() + "…" : "…";
 }
@@ -399,8 +579,7 @@ function introField(rightOffset: number, t: number, terraceTarget: number) {
     (t - INTRO_TERRACE_FALLBACK_START) / INTRO_TERRACE_FALLBACK_SECONDS,
   );
   const wake =
-    ease((delta + INTRO_WAVE_WIDTH * 1.65) / (INTRO_WAVE_WIDTH * 1.85)) *
-    enter;
+    ease((delta + INTRO_WAVE_WIDTH * 1.65) / (INTRO_WAVE_WIDTH * 1.85)) * enter;
   const terrace = Math.max(wake, fallback);
   const overshootScale =
     1 - 0.6 * Math.max(0, Math.min(1, terraceTarget / 2.15));
@@ -432,6 +611,7 @@ type FixedDetailCameraBasis = {
   y: number;
   z: number;
   aspect: number;
+  drawer: number;
 };
 
 const ease = (t: number) => {
@@ -461,7 +641,9 @@ function columnSwitchWave(
 }
 export class ArchiveScene {
   private inputEvents = new AbortController();
-  revealImmediately() { this.reveal = this.targetReveal; }
+  revealImmediately() {
+    this.reveal = this.targetReveal;
+  }
   get isIntroActive() {
     return this.intro !== null;
   }
@@ -544,7 +726,8 @@ export class ArchiveScene {
     if (this.pendingOverviewBadgeRefresh) {
       this.pendingOverviewBadgeRefresh = false;
       if (!skipBadgeRefresh) {
-        if (this.isDetailBadgeActive()) this.drawFullOverviewBadge(this.selectedIndex);
+        if (this.isDetailBadgeActive())
+          this.drawFullOverviewBadge(this.selectedIndex);
         else this.bindOverviewFullBadge(this.selectedIndex);
       }
     }
@@ -627,7 +810,8 @@ export class ArchiveScene {
       this.scene.add(warmOutgoing);
       this.outgoing.push({
         group: warmOutgoing,
-        slot: fileLocation(fileAtCell(warmCell, this.coordinateOrigin.row)).slot,
+        slot: fileLocation(fileAtCell(warmCell, this.coordinateOrigin.row))
+          .slot,
         cell: warmCell,
         lift: { value: OVERVIEW_LIFT * 0.5, velocity: 0 },
         returnY: null,
@@ -682,6 +866,40 @@ export class ArchiveScene {
   }
   dispose() {
     this.disposed = true;
+    if (this.detailCopiedTimer) {
+      window.clearTimeout(this.detailCopiedTimer);
+      this.detailCopiedTimer = 0;
+    }
+    this.detailPulloutTexture = undefined;
+    this.detailPulloutGroup = undefined;
+    this.detailPulloutLayout = null;
+    this.detailStickerTexture = undefined;
+    this.detailStickerBackTexture = undefined;
+    this.detailStickerShadowTexture = undefined;
+    this.detailStickerShadowPeel.value.set(0, 0.24, 0, 0);
+    this.detailStickerHoverCorner = -1;
+    this.detailStickerGroup = undefined;
+    this.detailStickerGeom = undefined;
+    this.detailStickerBasePos = undefined;
+    this.detailStickerFrontMat = undefined;
+    this.detailStickerBackMat = undefined;
+    this.detailStickerShadowMat = undefined;
+    for (const entry of this.hoverStickerCache.values()) {
+      if (entry.texture !== this.hoverStickerFrontMat?.map) entry.texture.dispose();
+    }
+    this.hoverStickerCache.clear();
+    this.hoverStickerIndex = -1;
+    this.hoverStickerCell = null;
+    this.hoverStickerGroup = undefined;
+    this.hoverStickerFrontMat = undefined;
+    this.hoverStickerShadowMat = undefined;
+    this.detailToggleInTexture = undefined;
+    this.detailToggleOutTexture = undefined;
+    this.detailToggleGroup = undefined;
+    this.detailToggleInMesh = undefined;
+    this.detailToggleOutMesh = undefined;
+    this.detailToggleInUniforms = undefined;
+    this.detailToggleOutUniforms = undefined;
     this.inputEvents.abort();
     this.cancelPointer();
     for (const prewarm of this.outgoingPrewarm) {
@@ -736,18 +954,21 @@ export class ArchiveScene {
     if (this.superPerformance === enabled) return;
     this.superPerformance = enabled;
     for (const inst of this.instances) {
-      const original = (inst.userData.fullMaterial ??= inst.material) as THREE.MeshPhysicalMaterial;
+      const original = (inst.userData.fullMaterial ??=
+        inst.material) as THREE.MeshPhysicalMaterial;
       if (enabled && !inst.userData.fastMaterial) {
         const fast = original.clone();
         fast.onBeforeCompile = original.onBeforeCompile;
-        fast.customProgramCacheKey = original.customProgramCacheKey.bind(original);
+        fast.customProgramCacheKey =
+          original.customProgramCacheKey.bind(original);
         fast.transmission = 0;
         fast.clearcoat = 0;
-        fast.roughness = Math.max(.45, original.roughness);
+        fast.roughness = Math.max(0.45, original.roughness);
         inst.userData.fastMaterial = fast;
       }
       inst.material = enabled ? inst.userData.fastMaterial : original;
-      inst.visible = !enabled || surfaceRole(surfaceName(original.name)) !== "fastener";
+      inst.visible =
+        !enabled || surfaceRole(surfaceName(original.name)) !== "fastener";
     }
     this.resize();
   }
@@ -833,11 +1054,7 @@ export class ArchiveScene {
     // fill. Install it on each final material because Three material clones do
     // not retain onBeforeCompile.
     if (role === "seal") {
-      installOverviewSealFill(
-        material,
-        bottomLight,
-        !instanced,
-      );
+      installOverviewSealFill(material, bottomLight, !instanced);
       return undefined;
     }
     const flag =
@@ -846,53 +1063,61 @@ export class ArchiveScene {
         : "archiveNeighborUnderlight";
     if (material.userData[flag]) {
       return material.userData.archiveSlotLightValues as
-        | OverviewSlotLightUniforms
-        | undefined;
+        OverviewSlotLightUniforms | undefined;
     }
     material.userData[flag] = true;
     const before = material.onBeforeCompile;
     const cache = material.customProgramCacheKey.bind(material);
     const badgeSurface = surfaceName(material.name) === "REF_Glass";
-    const hoverBadge = badgeSurface && instanced ? {
-      instance: this.hoverBadgeInstance,
-      heightFraction: HOVER_BADGE_HEIGHT / OVERVIEW_BADGE_HEIGHT,
-    } : undefined;
+    const hoverBadge =
+      badgeSurface && instanced
+        ? {
+            instance: this.hoverBadgeInstance,
+            heightFraction: HOVER_BADGE_HEIGHT / OVERVIEW_BADGE_HEIGHT,
+          }
+        : undefined;
     const badge = hoverBadge
       ? this.hoverBadgeUniform
-      : badgeSurface && mode === "selected" ? this.overviewBadgeUniform : undefined;
+      : badgeSurface && mode === "selected"
+        ? this.overviewBadgeUniform
+        : undefined;
     const slotStrength = UNDERLIGHT_SLOT_STRENGTH[role] ?? 0.012;
     const baseStrength = UNDERLIGHT_BASE_STRENGTH + slotStrength;
     const activeStrength = UNDERLIGHT_ACTIVE_STRENGTH[role] ?? 0.06;
     const endStrength = UNDERLIGHT_END_STRENGTH[role] ?? 0;
-    const reflectionStrength =
-      UNDERLIGHT_REFLECTION_STRENGTH[role] ?? 0;
+    const reflectionStrength = UNDERLIGHT_REFLECTION_STRENGTH[role] ?? 0;
     const lateralStrength = UNDERLIGHT_LATERAL_STRENGTH[role] ?? 0;
     // The acrylic tube is an open perimeter. Its visible end cap starts beyond
     // the ordinary lower strip, so give that narrow wall a separate active-only
     // coupling while keeping the constant floor strip at its existing width.
     const activeOuterX =
       role === "acrylic" || role === "glass" || role === "frame" ? 2.46 : 2.36;
-    const activeHeight = role === "acrylic"
-      ? "pow(max(1.0 - archiveLocalY, 0.0), 0.88) *\n" +
-        "  (0.82 + 0.18 * (1.0 - smoothstep(0.04, 0.35, archiveLocalY)))"
-      : role === "glass" || role === "frame"
-        ? "pow(max(1.0 - archiveLocalY, 0.0), 1.15) *\n" +
+    const activeHeight =
+      role === "acrylic"
+        ? "pow(max(1.0 - archiveLocalY, 0.0), 0.88) *\n" +
           "  (0.82 + 0.18 * (1.0 - smoothstep(0.04, 0.35, archiveLocalY)))"
-        : "0.16 + 0.84 * exp(-archiveLocalY * 1.55)";
+        : role === "glass" || role === "frame"
+          ? "pow(max(1.0 - archiveLocalY, 0.0), 1.15) *\n" +
+            "  (0.82 + 0.18 * (1.0 - smoothstep(0.04, 0.35, archiveLocalY)))"
+          : "0.16 + 0.84 * exp(-archiveLocalY * 1.55)";
     const endZoneStart =
       role === "glass" ? 2.26 : role === "acrylic" ? 2.24 : 2.28;
     const endZoneEnd =
       role === "glass" ? 2.38 : role === "acrylic" ? 2.45 : 2.46;
-    const endHeight = role === "glass"
-      ? "(0.85 + 0.15 * archiveBottomLip) * (1.0 - smoothstep(0.55, 0.82, archiveLocalY))"
-      : role === "acrylic" || role === "frame" || role === "engrave" || role === "shell"
-        ? "(0.85 + 0.15 * archiveBottomLip) * (1.0 - smoothstep(0.56, 0.84, archiveLocalY))"
-        : "0.0";
+    const endHeight =
+      role === "glass"
+        ? "(0.85 + 0.15 * archiveBottomLip) * (1.0 - smoothstep(0.55, 0.82, archiveLocalY))"
+        : role === "acrylic" ||
+            role === "frame" ||
+            role === "engrave" ||
+            role === "shell"
+          ? "(0.85 + 0.15 * archiveBottomLip) * (1.0 - smoothstep(0.56, 0.84, archiveLocalY))"
+          : "0.0";
     const reflectionZoneStart =
       role === "glass" || role === "shell" || role === "card"
         ? 2.26
         : role === "acrylic"
-          ? 2.20
+          ? 2.2
           : 2.22;
     const reflectionZoneEnd =
       role === "glass" || role === "shell" || role === "card"
@@ -1048,12 +1273,12 @@ export class ArchiveScene {
             ? `totalEmissiveRadiance += archiveWarmWhite * archiveBottomLight * archiveSlotProximity * archiveDefaultGlow * ${glslFloat(baseStrength)};\n` +
               `totalEmissiveRadiance += archiveActiveWarmWhite * archiveBottomLight * archiveSlotProximity * archiveSlotLightGain * archiveActiveGlow * ${glslFloat(activeStrength * 0.75)};\n` +
               `totalEmissiveRadiance += archiveActiveWarmWhite * archiveBottomLight * archiveSlotProximity * archiveSlotLightGain * archiveEndGlow * ${glslFloat(endStrength * 0.65)};\n` +
-              `totalEmissiveRadiance += archiveReflectionWhite * archiveBottomLight * archiveSlotProximity * archiveSlotLightGain * archiveReflectionGlow * ${glslFloat(reflectionStrength * 0.30)};\n` +
+              `totalEmissiveRadiance += archiveReflectionWhite * archiveBottomLight * archiveSlotProximity * archiveSlotLightGain * archiveReflectionGlow * ${glslFloat(reflectionStrength * 0.3)};\n` +
               `totalEmissiveRadiance += archiveLateralWhite * archiveBottomLight * archiveSlotProximity * archiveSlotLightGain * archiveLateralGlow * ${glslFloat(lateralStrength)};`
             : `totalEmissiveRadiance += archiveWarmWhite * archiveBottomLight * archiveDefaultGlow * ${glslFloat(baseStrength)};\n` +
               `totalEmissiveRadiance += archiveActiveWarmWhite * archiveBottomLight * archiveSlotLightGain * archiveActiveGlow * ${glslFloat(activeStrength * 0.75)};\n` +
               `totalEmissiveRadiance += archiveActiveWarmWhite * archiveBottomLight * archiveSlotLightGain * archiveEndGlow * ${glslFloat(endStrength * 0.65)};\n` +
-              `totalEmissiveRadiance += archiveReflectionWhite * archiveBottomLight * archiveSlotLightGain * archiveReflectionGlow * ${glslFloat(reflectionStrength * 0.30)};\n` +
+              `totalEmissiveRadiance += archiveReflectionWhite * archiveBottomLight * archiveSlotLightGain * archiveReflectionGlow * ${glslFloat(reflectionStrength * 0.3)};\n` +
               `totalEmissiveRadiance += archiveLateralWhite * archiveBottomLight * archiveSlotLightGain * archiveLateralGlow * ${glslFloat(lateralStrength)};`),
       );
       applyOverviewLook(
@@ -1061,8 +1286,12 @@ export class ArchiveScene {
         role,
         badge,
         hoverBadge,
-        badge === this.overviewBadgeUniform ? this.overviewBadgeHeadingEdge : undefined,
-        badge === this.overviewBadgeUniform ? this.overviewBadgeHeightFraction : undefined,
+        badge === this.overviewBadgeUniform
+          ? this.overviewBadgeHeadingEdge
+          : undefined,
+        badge === this.overviewBadgeUniform
+          ? this.overviewBadgeHeightFraction
+          : undefined,
         slotProximity,
       );
     };
@@ -1092,11 +1321,7 @@ export class ArchiveScene {
         return;
       const material = child.material;
       if (!(material instanceof THREE.MeshStandardMaterial)) return;
-      const slotLight = this.installOverviewUnderlight(
-        material,
-        role,
-        mode,
-      );
+      const slotLight = this.installOverviewUnderlight(material, role, mode);
       if (slotLight) child.userData.slotLight = slotLight;
     });
   }
@@ -1110,8 +1335,7 @@ export class ArchiveScene {
     group.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
       const slotLight = child.userData.slotLight as
-        | OverviewSlotLightUniforms
-        | undefined;
+        OverviewSlotLightUniforms | undefined;
       if (!slotLight) return;
       slotLight.direct.value = direct;
       slotLight.reflection.value = reflection;
@@ -1208,11 +1432,7 @@ export class ArchiveScene {
   /** Override the moving slot highlight only. The constant low underlight
    *  remains visible for same-camera A/B acceptance. */
   setOverviewSlotLightGain(gain: number) {
-    const value = THREE.MathUtils.clamp(
-      Number.isFinite(gain) ? gain : 1,
-      0,
-      2,
-    );
+    const value = THREE.MathUtils.clamp(Number.isFinite(gain) ? gain : 1, 0, 2);
     this.overviewSlotLightGain.value = value;
     this.renderState.invalidate();
     return value;
@@ -1365,8 +1585,16 @@ export class ArchiveScene {
   private targetDetail = 0;
   private reveal = 0;
   private targetReveal = 0;
-  private intro: { elapsed: number; fullLiftUnlocked: boolean; started: boolean } | null = null;
-  private introRelease: { elapsed: number; age: number; cell: ArchiveCell } | null = null;
+  private intro: {
+    elapsed: number;
+    fullLiftUnlocked: boolean;
+    started: boolean;
+  } | null = null;
+  private introRelease: {
+    elapsed: number;
+    age: number;
+    cell: ArchiveCell;
+  } | null = null;
   private last: number | null = null;
   private pointer = new THREE.Vector2();
   private dragging = false;
@@ -1375,10 +1603,16 @@ export class ArchiveScene {
   private archiveDrag = new ArchiveDrag();
   private dragTrack: DragPosition | null = null;
   private navigatingDrag = false;
-  private archiveMomentum: { motion: ArchivePlaneMomentum; time: number } | null = null;
+  private archiveMomentum: {
+    motion: ArchivePlaneMomentum;
+    time: number;
+  } | null = null;
   private holdingArchive = false;
   private cancelPointer = () => {};
-  private pendingHover: Pick<PointerEvent, 'clientX' | 'clientY' | 'pointerType'> | null = null;
+  private pendingHover: Pick<
+    PointerEvent,
+    "clientX" | "clientY" | "pointerType"
+  > | null = null;
   private flushHover = () => {};
   private rotation = 0;
   private targetRotation = 0;
@@ -1429,7 +1663,9 @@ export class ArchiveScene {
       texture: THREE.CanvasTexture;
     }
   >();
-  private readonly hoverBadgeUniform = { value: undefined as THREE.CanvasTexture | undefined };
+  private readonly hoverBadgeUniform = {
+    value: undefined as THREE.CanvasTexture | undefined,
+  };
   private readonly hoverBadgeInstance = { value: -1 };
   private hoverBadgeIndex = -1;
   private readonly modelProviderImages = new Map<
@@ -1446,6 +1682,77 @@ export class ArchiveScene {
   private selectedIndex = 0;
   /** 卡面前表面的模型局部 Z；旧模型没有 card 角色时保留旧铭牌平面值。 */
   private cardPlaneZ = 0.255;
+  private glassFrontZ = 0.0505;
+  private lastShowcaseStatRects: ShowcaseStatRects = {};
+  private detailHoveredHotspot: DetailHotspot | null = null;
+  private detailDrawerOpen = false;
+  private detailDrawer = { value: 0, velocity: 0 };
+  private detailCardScrollY = 0;
+  private detailCopiedRecord?: ArchiveRecord;
+  private detailCopiedTimer = 0;
+  private detailPulloutGroup?: THREE.Group;
+  private detailPulloutCanvas = document.createElement("canvas");
+  private detailPulloutTexture?: THREE.CanvasTexture;
+  private detailPulloutLayout: PulloutCardLayout | null = null;
+  private detailStickerGroup?: THREE.Group;
+  private detailStickerGeom?: THREE.PlaneGeometry;
+  private detailStickerBasePos?: Float32Array;
+  /** 四角卷翘弹簧，顺序与 STICKER_CORNERS 一致；只有右下角在静置时保留轻卷。 */
+  private readonly detailStickerCornerPeel = STICKER_CORNERS.map((_, corner) => ({
+    value: corner === STICKER_REST_CORNER ? 0.24 : 0,
+    velocity: 0,
+  }));
+  private readonly detailStickerPeelScratch = new Float32Array(
+    STICKER_CORNERS.length,
+  );
+  private detailStickerLastPeels = [-1, -1, -1, -1];
+  /** 指针当前落在哪个角（-1 表示不在贴纸上），仅在贴纸上时参与掀起。 */
+  private detailStickerHoverCorner = -1;
+  private detailStickerShadowPeel = {
+    value: new THREE.Vector4(0, 0.24, 0, 0),
+  };
+  private detailStickerCanvas = document.createElement("canvas");
+  private detailStickerTexture?: THREE.CanvasTexture;
+  private detailStickerBackTexture?: THREE.CanvasTexture;
+  private detailStickerShadowTexture?: THREE.CanvasTexture;
+  private detailStickerFrontMat?: THREE.MeshPhysicalMaterial;
+  private detailStickerBackMat?: THREE.MeshPhysicalMaterial;
+  private detailStickerShadowMat?: THREE.MeshBasicMaterial;
+  private hoverStickerGroup?: THREE.Group;
+  private hoverStickerFrontMat?: THREE.MeshPhysicalMaterial;
+  private hoverStickerShadowMat?: THREE.MeshBasicMaterial;
+  private hoverStickerCell: ArchiveCell | null = null;
+  private hoverStickerIndex = -1;
+  private hoverStickerCache = new Map<
+    number,
+    { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture }
+  >();
+  private readonly hoverStickerMatrix = new THREE.Matrix4();
+  private readonly hoverStickerPos = new THREE.Vector3();
+  private readonly hoverStickerQuat = new THREE.Quaternion();
+  private detailToggleGroup?: THREE.Group;
+  private detailToggleInMesh?: THREE.Mesh;
+  private detailToggleOutMesh?: THREE.Mesh;
+  private detailToggleInCanvas = document.createElement("canvas");
+  private detailToggleOutCanvas = document.createElement("canvas");
+  private detailToggleInTexture?: THREE.CanvasTexture;
+  private detailToggleOutTexture?: THREE.CanvasTexture;
+  private detailToggleInUniforms?: MistDissolveShaderUniforms;
+  private detailToggleOutUniforms?: MistDissolveShaderUniforms;
+  private detailToggleMode: "hidden" | "reveal" | "visible" | "hide" = "hidden";
+  private detailToggleElapsed = 0;
+  private detailToggleDuration = MIST_RETURN_DURATION_MS / 1000;
+  private detailToggleVisibility = 0;
+  private detailToggleLabelOpen = false;
+  private detailToggleSwitchActive = false;
+  private detailToggleSwitchElapsed = 0;
+  private readonly hoverStickerScale = new THREE.Vector3();
+  private readonly detailPickPlane = new THREE.Plane();
+  private readonly detailPickPoint = new THREE.Vector3();
+  private readonly detailClipPlane = new THREE.Plane(
+    new THREE.Vector3(1, 0, 0),
+    -2.495,
+  );
   private labelMark = new Image();
   private motion: MotionPreferences = fullMotion();
   private quality = normalizeQuality(undefined);
@@ -1457,6 +1764,8 @@ export class ArchiveScene {
   onHover?: (index: number | null) => void;
   onNavigate?: (axis: "row" | "lane", direction: number) => void;
   onIntroChange?: (active: boolean) => void;
+  onCopyPrompt?: (text: string) => Promise<boolean>;
+  onDetailCardOpenChange?: () => void;
   constructor(
     private container: HTMLElement,
     private readonly selectionPulse = baselineSelectionWave,
@@ -1468,6 +1777,7 @@ export class ArchiveScene {
       alpha: false,
       powerPreference: "high-performance",
     });
+    this.renderer.localClippingEnabled = true;
     this.renderer.debug.checkShaderErrors = import.meta.env.DEV;
     this.renderer.setPixelRatio(
       Math.min(devicePixelRatio, 1.5) *
@@ -1489,12 +1799,16 @@ export class ArchiveScene {
       "三维研究档案阵列，点击选择，左右拖动切列，上下拖动或滚轮切换列内档案",
     );
     container.appendChild(this.renderer.domElement);
-    this.renderer.domElement.addEventListener('webglcontextrestored', () => {
-      this.renderState.invalidate();
-      this.shadowState.invalidate();
-      this.shadowStale = false;
-      this.shadowTick = 0;
-    }, { signal: this.inputEvents.signal });
+    this.renderer.domElement.addEventListener(
+      "webglcontextrestored",
+      () => {
+        this.renderState.invalidate();
+        this.shadowState.invalidate();
+        this.shadowStale = false;
+        this.shadowTick = 0;
+      },
+      { signal: this.inputEvents.signal },
+    );
     this.scene.background = new THREE.Color(WARM.field);
     // The frame updates world matrices once after simulation; subsequent
     // beauty, normal, depth and transmission renders reuse those same matrices.
@@ -1522,14 +1836,16 @@ export class ArchiveScene {
     this.overviewAreaLight.position.set(
       (this.selectedCell.lane - 2) * COLUMN_SPACING,
       OVERVIEW_RECT_LIGHT_Y,
-      (this.selectedCell.row - 15.5) * ROW_SPACING + OVERVIEW_RECT_LIGHT_Z_OFFSET,
+      (this.selectedCell.row - 15.5) * ROW_SPACING +
+        OVERVIEW_RECT_LIGHT_Z_OFFSET,
     );
     this.scene.add(this.overviewAreaLight);
     this.overviewLightStrip.rotation.x = -Math.PI / 2;
     this.overviewLightStrip.position.set(
       (this.selectedCell.lane - 2) * COLUMN_SPACING,
       -4.52,
-      (this.selectedCell.row - 15.5) * ROW_SPACING + OVERVIEW_RECT_LIGHT_Z_OFFSET,
+      (this.selectedCell.row - 15.5) * ROW_SPACING +
+        OVERVIEW_RECT_LIGHT_Z_OFFSET,
     );
     this.overviewLightStrip.name = "archive-overview-light-strip";
     this.scene.add(this.overviewLightStrip);
@@ -1553,7 +1869,9 @@ export class ArchiveScene {
     this.cameraAim.set(-0.5, 1.1, 0.4);
     this.camera.fov = 6.15;
     this.camera.lookAt(this.cameraAim);
-    const composerSize = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    const composerSize = this.renderer.getDrawingBufferSize(
+      new THREE.Vector2(),
+    );
     const composerDepth = new THREE.DepthTexture(
       Math.max(1, composerSize.x),
       Math.max(1, composerSize.y),
@@ -1600,9 +1918,7 @@ export class ArchiveScene {
     await this.labelMark
       .decode()
       .catch((error) => console.warn("[label] mark decode failed", error));
-    const gltf = await new GLTFLoader().loadAsync(
-      assetUrl,
-    );
+    const gltf = await loadGltfWithRetry(assetUrl);
     gltf.scene.updateMatrixWorld(true);
     const normalized = normalizeArchiveScene(gltf.scene);
     const meshes: THREE.Mesh[] = [];
@@ -1619,15 +1935,26 @@ export class ArchiveScene {
     // 有卡面角色时不再叠加独立标签平面，否则两层文字会互相盖住。
     let hasCardSurface = false;
     let cardPlaneZ = -Infinity;
+    let glassFrontZ = -Infinity;
     for (const mesh of meshes) {
       const geom = mesh.geometry
         .clone()
         .applyMatrix4(mesh.matrixWorld)
-        .translate(normalized.offset.x, normalized.offset.y, normalized.offset.z)
+        .translate(
+          normalized.offset.x,
+          normalized.offset.y,
+          normalized.offset.z,
+        )
         .scale(1, 1, 1);
       const source = mesh.material as THREE.MeshStandardMaterial;
       const name = surfaceName(source.name);
       const role = surfaceRole(name);
+      if (role === "glass") {
+        if (!geom.boundingBox) geom.computeBoundingBox();
+        if (geom.boundingBox) {
+          glassFrontZ = Math.max(glassFrontZ, geom.boundingBox.max.z);
+        }
+      }
       if (role === "card") {
         geom.computeBoundingBox();
         if (geom.boundingBox)
@@ -1677,6 +2004,9 @@ export class ArchiveScene {
         mat.thickness = 0;
         mat.roughness = 0.44;
         mat.metalness = 0;
+        mat.polygonOffset = true;
+        mat.polygonOffsetFactor = 2;
+        mat.polygonOffsetUnits = 2;
       }
       if (role === "frame") {
         // 边框只比主体深一档，靠明度而不是高对比描边塑形。
@@ -1687,6 +2017,11 @@ export class ArchiveScene {
         mat.thickness = 0;
         mat.roughness = 0.58;
         mat.metalness = 0;
+        if (name === "REF_FrameMintIn") {
+          mat.polygonOffset = true;
+          mat.polygonOffsetFactor = 1;
+          mat.polygonOffsetUnits = 1;
+        }
       }
       if (role === "card") {
         // 印刷纸面：覆膜用 clearcoat，不用 transmission。
@@ -1700,6 +2035,9 @@ export class ArchiveScene {
         mat.metalness = 0;
         mat.clearcoat = 0.1;
         mat.clearcoatRoughness = 0.3;
+        mat.polygonOffset = true;
+        mat.polygonOffsetFactor = 2;
+        mat.polygonOffsetUnits = 2;
         hasCardSurface = true;
       }
       if (role === "diffuser") {
@@ -1721,9 +2059,7 @@ export class ArchiveScene {
         mat.metalness = 0.08;
       }
       if (role === "engrave") {
-        mat.color.set(
-          name === "REF_FrameInk" ? WARM.frameInk : WARM.ruler,
-        );
+        mat.color.set(name === "REF_FrameInk" ? WARM.frameInk : WARM.ruler);
         mat.transmission = 0;
         mat.roughness = 0.62;
         mat.metalness = 0;
@@ -1747,7 +2083,10 @@ export class ArchiveScene {
       selectedMesh.castShadow =
         role === "diffuser" || role === "shell" || role === "frame";
       selectedMesh.receiveShadow =
-        role === "shell" || role === "frame" || role === "card" || role === "seal";
+        role === "shell" ||
+        role === "frame" ||
+        role === "card" ||
+        role === "seal";
       if (mat.transmission === 0) selectedMesh.renderOrder = -5;
       this.model.add(selectedMesh);
       // Keep the readable shell, frame, optical edge, card, seal and fastener
@@ -1819,10 +2158,22 @@ export class ArchiveScene {
         arrayMat.metalness = 0.05;
       }
       this.appearance.register(name, mat, arrayMat);
-      this.slotLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
-      this.neighborLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
-      this.lateralLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
-      this.topRailLightAttribute ??= new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
+      this.slotLightAttribute ??= new THREE.InstancedBufferAttribute(
+        new Float32Array(capacity),
+        1,
+      ).setUsage(THREE.DynamicDrawUsage);
+      this.neighborLightAttribute ??= new THREE.InstancedBufferAttribute(
+        new Float32Array(capacity),
+        1,
+      ).setUsage(THREE.DynamicDrawUsage);
+      this.lateralLightAttribute ??= new THREE.InstancedBufferAttribute(
+        new Float32Array(capacity),
+        1,
+      ).setUsage(THREE.DynamicDrawUsage);
+      this.topRailLightAttribute ??= new THREE.InstancedBufferAttribute(
+        new Float32Array(capacity),
+        1,
+      ).setUsage(THREE.DynamicDrawUsage);
       geom.setAttribute("archiveSlotLight", this.slotLightAttribute);
       geom.setAttribute("archiveSlotReflection", this.neighborLightAttribute);
       geom.setAttribute("archiveSlotLateral", this.lateralLightAttribute);
@@ -1830,7 +2181,9 @@ export class ArchiveScene {
       this.installOverviewUnderlight(arrayMat, role, "neighbor", true);
       const inst = new THREE.InstancedMesh(geom, arrayMat, capacity);
       // All surfaces move rigidly together; share the transform buffer on the GPU.
-      inst.instanceMatrix = this.instances[0]?.instanceMatrix ?? inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      inst.instanceMatrix =
+        this.instances[0]?.instanceMatrix ??
+        inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       inst.castShadow =
         role === "diffuser" || role === "shell" || role === "frame";
       inst.receiveShadow =
@@ -1848,6 +2201,7 @@ export class ArchiveScene {
       this.instances.push(inst);
       this.scene.add(inst);
     }
+    this.glassFrontZ = Number.isFinite(glassFrontZ) ? glassFrontZ : 0.0505;
     this.cardPlaneZ = Number.isFinite(cardPlaneZ) ? cardPlaneZ : 0.255;
     // 投影来源按角色兜底：旧模型用 diffuser，新模型没有这个件，退到主体或卡面。
     // 旧代码用非空断言取第一个 castShadow 网格，换模型会直接抛错。
@@ -1895,8 +2249,10 @@ export class ArchiveScene {
     this.labelTexture.colorSpace = THREE.SRGBColorSpace;
     this.labelTexture.anisotropy =
       this.renderer.capabilities.getMaxAnisotropy();
-    this.overviewBadgeCanvas.width = OVERVIEW_BADGE_WIDTH * OVERVIEW_BADGE_SCALE;
-    this.overviewBadgeCanvas.height = OVERVIEW_BADGE_HEIGHT * OVERVIEW_BADGE_SCALE;
+    this.overviewBadgeCanvas.width =
+      OVERVIEW_BADGE_WIDTH * OVERVIEW_BADGE_SCALE;
+    this.overviewBadgeCanvas.height =
+      OVERVIEW_BADGE_HEIGHT * OVERVIEW_BADGE_SCALE;
     this.overviewBadgeTexture = new THREE.CanvasTexture(
       this.overviewBadgeCanvas,
     );
@@ -1936,12 +2292,937 @@ export class ArchiveScene {
     }
     this.model.updateMatrixWorld(true);
     this.modelBounds.setFromObject(this.model);
+    this.initPulloutCardMesh();
+    this.initDetailStickerMesh();
+    this.initHoverStickerMesh();
+    this.initDetailToggleMesh();
     this.scene.add(this.model);
     this.model.position.copy(this.cellPosition(this.selectedCell));
     await this.prewarmOutgoingPrograms();
     this.loaded = true;
+    this.redrawDetailSticker();
   }
 
+  private createDetailSurfaceTexture(canvas: HTMLCanvasElement) {
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.flipY = false;
+    texture.repeat.y = -1;
+    texture.offset.y = 1;
+    return texture;
+  }
+  private initPulloutCardMesh() {
+    if (this.detailPulloutGroup) return;
+    this.detailPulloutCanvas.width = PULLOUT_CANVAS_W;
+    this.detailPulloutCanvas.height = PULLOUT_CANVAS_H;
+    const tex = this.createDetailSurfaceTexture(this.detailPulloutCanvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    this.detailPulloutTexture = tex;
+
+    const group = new THREE.Group();
+    group.name = "DetailPulloutCard";
+    group.position.set(0.45, 1.85, 0);
+    group.visible = false;
+
+    const bodyGeom = new THREE.BoxGeometry(
+      PULLOUT_CARD_W,
+      PULLOUT_CARD_H,
+      0.016,
+    );
+    const bodyMat = new THREE.MeshPhysicalMaterial({
+      color: "#f4eee2",
+      emissive: "#f4eee2",
+      emissiveIntensity: 0.16,
+      roughness: 0.78,
+      metalness: 0,
+      transmission: 0,
+      thickness: 0,
+      clearcoat: 0,
+      clearcoatRoughness: 0,
+      polygonOffset: true,
+      polygonOffsetFactor: 2,
+      polygonOffsetUnits: 2,
+      clippingPlanes: [this.detailClipPlane],
+    });
+    const bodyMesh = new THREE.Mesh(bodyGeom, bodyMat);
+    bodyMesh.position.z = -0.008;
+    bodyMesh.castShadow = false;
+    bodyMesh.receiveShadow = false;
+
+    const frontGeom = new THREE.PlaneGeometry(PULLOUT_CARD_W, PULLOUT_CARD_H);
+    const frontMat = new THREE.MeshPhysicalMaterial({
+      color: "#ffffff",
+      map: tex,
+      emissive: "#ffffff",
+      emissiveMap: tex,
+      emissiveIntensity: 0.34,
+      roughness: 0.86,
+      metalness: 0,
+      transmission: 0,
+      thickness: 0,
+      clearcoat: 0,
+      clearcoatRoughness: 0,
+      clippingPlanes: [this.detailClipPlane],
+    });
+    const frontMesh = new THREE.Mesh(frontGeom, frontMat);
+    frontMesh.position.z = 0.003;
+    frontMesh.receiveShadow = false;
+
+    group.add(bodyMesh, frontMesh);
+    this.detailPulloutGroup = group;
+    this.scene.add(group);
+  }
+  private initDetailStickerMesh() {
+    if (this.detailStickerGroup) return;
+    this.detailStickerCanvas.width = STICKER_CANVAS_W;
+    this.detailStickerCanvas.height = STICKER_CANVAS_H;
+    const stickerTex = this.createDetailSurfaceTexture(this.detailStickerCanvas);
+    stickerTex.colorSpace = THREE.SRGBColorSpace;
+    stickerTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    this.detailStickerTexture = stickerTex;
+
+    const backCanvas = document.createElement("canvas");
+    drawStickerBackMask(backCanvas);
+    const backTex = this.createDetailSurfaceTexture(backCanvas);
+    backTex.colorSpace = THREE.SRGBColorSpace;
+    backTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    this.detailStickerBackTexture = backTex;
+
+    const shadowCanvas = document.createElement("canvas");
+    drawStickerContactShadow(shadowCanvas);
+    const shadowTex = this.createDetailSurfaceTexture(shadowCanvas);
+    shadowTex.colorSpace = THREE.SRGBColorSpace;
+    shadowTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    this.detailStickerShadowTexture = shadowTex;
+
+    const group = new THREE.Group();
+    group.name = "DetailDieCutSticker";
+    group.visible = false;
+
+    const shadowGeom = new THREE.PlaneGeometry(
+      STICKER_SHADOW_W,
+      STICKER_SHADOW_H,
+    );
+    const shadowSizeUniform = {
+      value: new THREE.Vector2(STICKER_SHADOW_W, STICKER_SHADOW_H),
+    };
+    const shadowMat = new THREE.MeshBasicMaterial({
+      map: shadowTex,
+      color: 0xffffff,
+      transparent: true,
+      depthTest: true,
+      depthWrite: false,
+      opacity: 0.72,
+      fog: true,
+    });
+    shadowMat.customProgramCacheKey = () => "detail-sticker-peel-shadow-v3";
+    shadowMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uPeel = this.detailStickerShadowPeel;
+      shader.uniforms.uShadowSize = shadowSizeUniform;
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "void main() {",
+          `uniform vec4 uPeel;
+uniform vec2 uShadowSize;
+
+float sdRoundedBox(vec2 p, vec2 b, float r) {
+  vec2 q = abs(p) - b + vec2(r);
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+// signs 指向该角在纸面内的外法线方向：右上 (1,1)、右下 (1,-1)、左下 (-1,-1)、左上 (-1,1)。
+float stickerPeelShadow(vec2 localPos, vec2 signs, float peel) {
+  float p = clamp(peel, 0.0, 1.0);
+  if (p <= 0.0005) return 0.0;
+  float radius = max(mix(0.22, 0.38, p), 0.001);
+  // 翻起的纸角把阴影投到背离主光的一侧（左上主光 → 右下偏移），四个角共用同一方向。
+  vec2 shift = vec2(0.010 + 0.022 * p, -(0.014 + 0.028 * p));
+  vec2 pShifted = localPos - shift;
+  float rx = 1.02 - signs.x * pShifted.x;
+  float ry = 0.33 - signs.y * pShifted.y;
+  float s = rx * 0.72 + ry * 0.69;
+  float u = clamp(1.0 - s / radius, 0.0, 1.0);
+  vec2 halfSize = vec2(1.0127, 0.3227);
+  float sdfFoot = sdRoundedBox(localPos, halfSize, 0.040);
+  float sdfCast = sdRoundedBox(pShifted, halfSize, 0.040);
+  float blurW = mix(0.010, 0.034, u * (0.4 + 0.6 * p));
+  float insideWedge = 1.0 - smoothstep(-blurW * 0.4, blurW, min(sdfFoot, sdfCast));
+  float creaseFade = smoothstep(0.0, 0.28, u);
+  float lipFocus = 0.75 + 0.25 * smoothstep(0.10, 0.75, u);
+  // 与几何一致的 0.1 包络，避免极小 peel 时还留着一层硬阴影。
+  float envelope = smoothstep(0.0, 0.1, p);
+  return insideWedge * creaseFade * lipFocus * mix(0.18, 0.76, pow(p, 0.58)) * envelope;
+}
+
+void main() {`,
+        )
+        .replace(
+          "#include <map_fragment>",
+          `#ifdef USE_MAP
+  vec4 baseShadow = texture2D(map, vMapUv);
+  vec2 localPos = (vec2(vMapUv.x, 1.0 - vMapUv.y) - 0.5) * uShadowSize;
+  float peelAlpha = max(
+    max(stickerPeelShadow(localPos, vec2(1.0, 1.0), uPeel.x),
+        stickerPeelShadow(localPos, vec2(1.0, -1.0), uPeel.y)),
+    max(stickerPeelShadow(localPos, vec2(-1.0, -1.0), uPeel.z),
+        stickerPeelShadow(localPos, vec2(-1.0, 1.0), uPeel.w)));
+  float combinedA = 1.0 - (1.0 - baseShadow.a) * (1.0 - peelAlpha);
+  vec3 peelRgb = vec3(0.018, 0.012, 0.008);
+  vec3 finalRgb = combinedA > 0.0005
+    ? (baseShadow.rgb * baseShadow.a + peelRgb * peelAlpha * (1.0 - baseShadow.a)) / combinedA
+    : peelRgb;
+  diffuseColor *= vec4(finalRgb, combinedA);
+#endif`,
+        );
+    };
+    const shadowMesh = new THREE.Mesh(shadowGeom, shadowMat);
+    shadowMesh.position.z = STICKER_CONTACT_SHADOW_LOCAL_Z;
+    shadowMesh.renderOrder = 2;
+    shadowMesh.castShadow = false;
+    shadowMesh.receiveShadow = false;
+    shadowMesh.userData.stickerShadowPeel = this.detailStickerShadowPeel;
+    this.detailStickerShadowMat = shadowMat;
+
+    const stickerGeom = new THREE.PlaneGeometry(STICKER_W, STICKER_H, 48, 24);
+    const posAttr = stickerGeom.attributes.position as THREE.BufferAttribute;
+    this.detailStickerBasePos = new Float32Array(posAttr.array as Float32Array);
+    this.detailStickerGeom = stickerGeom;
+    // 哨兵值保证首次 applyStickerPeel 一定会把几何从平面变形到静置卷翘。
+    this.detailStickerLastPeels = [-1, -1, -1, -1];
+
+    const frontMat = new THREE.MeshPhysicalMaterial({
+      color: "#ebe7df",
+      map: stickerTex,
+      emissive: "#f7f4ec",
+      emissiveMap: stickerTex,
+      emissiveIntensity: 0.46,
+      roughness: 0.72,
+      metalness: 0,
+      clearcoat: 0.14,
+      clearcoatRoughness: 0.36,
+      transmission: 0,
+      thickness: 0,
+      transparent: true,
+      alphaTest: 0,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+    frontMat.customProgramCacheKey = () => "detail-sticker-fold-shade-v2";
+    frontMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uPeel = this.detailStickerShadowPeel;
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "void main() {",
+          `uniform vec4 uPeel;
+
+// 返回 (折痕压暗, 弯折提亮)；signs 指向该角在纸面内的外法线方向。
+vec2 stickerCornerFold(vec2 b, vec2 signs, float peel) {
+  float p = clamp(peel, 0.0, 1.0);
+  if (p <= 0.0005) return vec2(0.0);
+  float foldRadius = max(mix(0.22, 0.38, p), 0.001);
+  float foldS = (1.02 - signs.x * b.x) * 0.72 + (0.33 - signs.y * b.y) * 0.69;
+  float foldU = clamp(1.0 - foldS / foldRadius, 0.0, 1.0);
+  float foldStrength = 0.45 + 0.55 * p;
+  float crease = smoothstep(0.0, 0.26, foldU) * (1.0 - smoothstep(0.26, 0.62, foldU)) * 0.065 * foldStrength;
+  float bend = sin(smoothstep(0.12, 0.92, foldU) * 3.14159265) * 0.075 * foldStrength;
+  // 与几何/阴影一致的 0.1 包络，避免极小 peel 时折痕仍然满强度。
+  return vec2(crease, bend) * smoothstep(0.0, 0.1, p);
+}
+
+void main() {`,
+        )
+        .replace(
+          "#include <opaque_fragment>",
+          `#ifdef USE_MAP
+{
+  vec2 b = vec2((vMapUv.x - 0.5) * 2.04, (0.5 - vMapUv.y) * 0.66);
+  vec2 fold = stickerCornerFold(b, vec2(1.0, 1.0), uPeel.x)
+            + stickerCornerFold(b, vec2(1.0, -1.0), uPeel.y)
+            + stickerCornerFold(b, vec2(-1.0, -1.0), uPeel.z)
+            + stickerCornerFold(b, vec2(-1.0, 1.0), uPeel.w);
+  outgoingLight = outgoingLight * (1.0 - fold.x) + vec3(fold.y);
+}
+#endif
+#include <opaque_fragment>`,
+        );
+    };
+    const frontMesh = new THREE.Mesh(stickerGeom, frontMat);
+    frontMesh.renderOrder = 4;
+    frontMesh.castShadow = false;
+    frontMesh.receiveShadow = false;
+    frontMesh.userData.stickerShadowPeel = this.detailStickerShadowPeel;
+    this.detailStickerFrontMat = frontMat;
+
+    const backMat = new THREE.MeshPhysicalMaterial({
+      color: "#ebe6dc",
+      map: backTex,
+      emissive: "#f2ede3",
+      emissiveIntensity: 0.48,
+      roughness: 0.92,
+      metalness: 0,
+      clearcoat: 0,
+      clearcoatRoughness: 0,
+      transmission: 0,
+      thickness: 0,
+      transparent: true,
+      alphaTest: 0,
+      depthWrite: false,
+      side: THREE.BackSide,
+    });
+    const backMesh = new THREE.Mesh(stickerGeom, backMat);
+    backMesh.renderOrder = 3;
+    backMesh.castShadow = false;
+    backMesh.receiveShadow = false;
+    this.detailStickerBackMat = backMat;
+
+    group.add(shadowMesh, frontMesh, backMesh);
+    this.detailStickerGroup = group;
+    for (let corner = 0; corner < STICKER_CORNERS.length; corner++) {
+      this.detailStickerPeelScratch[corner] =
+        this.detailStickerCornerPeel[corner].value;
+    }
+    this.applyStickerPeel(this.detailStickerPeelScratch);
+    this.scene.add(group);
+  }
+  private initHoverStickerMesh() {
+    // 悬停贴纸复用详情贴纸的接触投影纹理，因此必须在 initDetailStickerMesh()
+    // 之后调用；纹理尚未就绪时直接返回，避免创建出缺投影的悬停贴纸。
+    if (this.hoverStickerGroup || !this.detailStickerShadowTexture) return;
+    const group = new THREE.Group();
+    group.name = "HoverDieCutSticker";
+    group.visible = false;
+
+    const shadowGeom = new THREE.PlaneGeometry(
+      STICKER_SHADOW_W,
+      STICKER_SHADOW_H,
+    );
+    const shadowMat = new THREE.MeshBasicMaterial({
+      map: this.detailStickerShadowTexture,
+      color: 0xffffff,
+      transparent: true,
+      depthTest: true,
+      depthWrite: false,
+      opacity: 0,
+      fog: true,
+    });
+    const shadowMesh = new THREE.Mesh(shadowGeom, shadowMat);
+    shadowMesh.position.z = STICKER_CONTACT_SHADOW_LOCAL_Z;
+    shadowMesh.renderOrder = 2;
+    shadowMesh.castShadow = false;
+    shadowMesh.receiveShadow = false;
+    this.hoverStickerShadowMat = shadowMat;
+
+    const stickerGeom = new THREE.PlaneGeometry(STICKER_W, STICKER_H, 16, 8);
+    const basePos = new Float32Array(
+      (stickerGeom.attributes.position as THREE.BufferAttribute)
+        .array as Float32Array,
+    );
+    deformStickerGeometry(stickerGeom, basePos, [0, 0.1, 0, 0]);
+
+    const frontMat = new THREE.MeshPhysicalMaterial({
+      color: "#ebe7df",
+      emissive: "#f7f4ec",
+      emissiveIntensity: 0.25,
+      roughness: 0.72,
+      metalness: 0,
+      clearcoat: 0.08,
+      clearcoatRoughness: 0.45,
+      transmission: 0,
+      thickness: 0,
+      transparent: true,
+      alphaTest: 0,
+      depthTest: true,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+    const frontMesh = new THREE.Mesh(stickerGeom, frontMat);
+    frontMesh.renderOrder = 4;
+    frontMesh.castShadow = false;
+    frontMesh.receiveShadow = false;
+    this.hoverStickerFrontMat = frontMat;
+
+    group.add(shadowMesh, frontMesh);
+    this.hoverStickerGroup = group;
+    this.scene.add(group);
+  }
+  private bindHoverStickerTexture(index: number) {
+    if (!this.hoverStickerFrontMat || index === this.hoverStickerIndex) return;
+    let entry = this.hoverStickerCache.get(index);
+    if (entry) {
+      this.hoverStickerCache.delete(index);
+      this.hoverStickerCache.set(index, entry);
+      this.hoverStickerFrontMat.map = entry.texture;
+      this.hoverStickerFrontMat.emissiveMap = entry.texture;
+      this.hoverStickerFrontMat.needsUpdate = true;
+      this.hoverStickerIndex = index;
+      return;
+    }
+    if (this.hoverStickerCache.size >= MAX_HOVER_STICKER_CACHE) {
+      const oldestKey = this.hoverStickerCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        const oldest = this.hoverStickerCache.get(oldestKey);
+        this.hoverStickerCache.delete(oldestKey);
+        if (oldest) entry = oldest;
+      }
+    }
+    if (!entry) {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(STICKER_CANVAS_W * HOVER_STICKER_SCALE);
+      canvas.height = Math.round(STICKER_CANVAS_H * HOVER_STICKER_SCALE);
+      const texture = this.createDetailSurfaceTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = this.badgeAnisotropy();
+      entry = { canvas, texture };
+    }
+    drawIndustrialDieCutSticker(
+      entry.canvas,
+      records[index],
+      this.currentDetailSurfaceState(false),
+      HOVER_STICKER_SCALE,
+    );
+    entry.texture.needsUpdate = true;
+    this.hoverStickerCache.set(index, entry);
+    this.hoverStickerFrontMat.map = entry.texture;
+    this.hoverStickerFrontMat.emissiveMap = entry.texture;
+    this.hoverStickerFrontMat.needsUpdate = true;
+    this.hoverStickerIndex = index;
+  }
+  private createMistEtchMaterial(
+    texture: THREE.CanvasTexture,
+    seed: number,
+  ): {
+    material: THREE.MeshBasicMaterial;
+    uniforms: MistDissolveShaderUniforms;
+  } {
+    const uniforms: MistDissolveShaderUniforms = {
+      uProgress: { value: 1 },
+      uHiding: { value: 0 },
+      uActive: { value: 0 },
+      uModeSwitch: { value: 0 },
+      uSeed: { value: seed },
+      uTexelSize: {
+        value: new THREE.Vector2(1 / TOGGLE_CANVAS_W, 1 / TOGGLE_CANVAS_H),
+      },
+    };
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      color: DETAIL_TOGGLE_INK_COLOR.clone(),
+      transparent: true,
+      opacity: 1,
+      depthTest: true,
+      depthWrite: false,
+      side: THREE.FrontSide,
+      fog: true,
+    });
+    material.customProgramCacheKey = () => "detail-toggle-mist-etch-v2";
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.uProgress = uniforms.uProgress;
+      shader.uniforms.uHiding = uniforms.uHiding;
+      shader.uniforms.uActive = uniforms.uActive;
+      shader.uniforms.uModeSwitch = uniforms.uModeSwitch;
+      shader.uniforms.uSeed = uniforms.uSeed;
+      shader.uniforms.uTexelSize = uniforms.uTexelSize;
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "void main() {",
+          `uniform float uProgress;
+uniform float uHiding;
+uniform float uActive;
+uniform float uModeSwitch;
+uniform float uSeed;
+uniform vec2 uTexelSize;
+
+float mistEaseOutQuad(float t) {
+  float inv = 1.0 - t;
+  return 1.0 - inv * inv;
+}
+float mistEaseOutCubic(float t) {
+  float inv = 1.0 - t;
+  return 1.0 - inv * inv * inv;
+}
+float mistCellHash(float col, float row, float seed) {
+  return fract(sin(dot(vec3(col + 1.0, row + 1.0, seed), vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+}
+
+void main() {`,
+        )
+        .replace(
+          "#include <map_fragment>",
+          `#ifdef USE_MAP
+  if (uActive < 0.5) {
+    diffuseColor.a *= texture2D(map, vMapUv).a;
+  } else {
+    float localT = clamp(uProgress, 0.0, 1.0);
+    float motionT = uHiding > 0.5 ? mistEaseOutQuad(localT) : mistEaseOutCubic(localT);
+    float blurMax = uModeSwitch > 0.5 ? (uHiding > 0.5 ? 5.0 : 4.8) : (uHiding > 0.5 ? 6.5 : 5.5);
+    float blurPx = (uHiding > 0.5 ? motionT : (1.0 - motionT)) * blurMax * 1.8;
+    vec2 stepUv = uTexelSize * blurPx;
+    float blurAlpha =
+      texture2D(map, vMapUv).a * 0.24 +
+      (
+        texture2D(map, vMapUv + vec2(stepUv.x, 0.0)).a +
+        texture2D(map, vMapUv - vec2(stepUv.x, 0.0)).a +
+        texture2D(map, vMapUv + vec2(0.0, stepUv.y)).a +
+        texture2D(map, vMapUv - vec2(0.0, stepUv.y)).a
+      ) * 0.11 +
+      (
+        texture2D(map, vMapUv + vec2(stepUv.x, stepUv.y) * 0.78).a +
+        texture2D(map, vMapUv + vec2(-stepUv.x, stepUv.y) * 0.78).a +
+        texture2D(map, vMapUv + vec2(stepUv.x, -stepUv.y) * 0.78).a +
+        texture2D(map, vMapUv + vec2(-stepUv.x, -stepUv.y) * 0.78).a
+      ) * 0.08;
+
+    float uText = clamp((vMapUv.x - 0.52) / 0.44, 0.0, 1.0);
+    float vText = clamp((vMapUv.y - 0.28) / 0.44, 0.0, 1.0);
+    float col = clamp(floor((uText - (-0.18)) / (1.36 / 10.0)), 0.0, 9.0);
+    float row = clamp(floor((vText - (-0.28)) / (1.56 / 4.0)), 0.0, 3.0);
+    float nx = col / 9.0;
+    float ny = row / 3.0;
+    float score = nx * 0.45 + ny * 0.15 + mistCellHash(col, row, uSeed) * 0.40;
+    float stratum = min(7.0, floor(score * 8.0));
+    float center = (stratum + 0.5) / 8.0;
+    float mapped = localT * 1.36 - 0.18;
+    float rev = smoothstep(center - 0.18, center + 0.18, mapped);
+    float maskAlpha = uHiding > 0.5 ? (1.0 - rev) : rev;
+
+    float bloomPeak = uModeSwitch > 0.5 ? (uHiding > 0.5 ? 0.10 : 0.13) : (uHiding > 0.5 ? 0.14 : 0.18);
+    float bloom = 1.0 + sin(motionT * 3.14159265) * bloomPeak;
+    float alphaFade = uHiding > 0.5 ? clamp((1.0 - localT) * 1.25, 0.0, 1.0) : clamp(localT * 1.35, 0.0, 1.0);
+    diffuseColor.rgb = min(vec3(1.0), diffuseColor.rgb * bloom);
+    diffuseColor.a *= blurAlpha * maskAlpha * alphaFade;
+  }
+#endif`,
+        );
+    };
+    return { material, uniforms };
+  }
+  private initDetailToggleMesh() {
+    if (this.detailToggleGroup) return;
+    this.detailToggleInCanvas.width = TOGGLE_CANVAS_W;
+    this.detailToggleInCanvas.height = TOGGLE_CANVAS_H;
+    this.detailToggleOutCanvas.width = TOGGLE_CANVAS_W;
+    this.detailToggleOutCanvas.height = TOGGLE_CANVAS_H;
+
+    const aniso = this.badgeAnisotropy();
+    const inTex = this.createDetailSurfaceTexture(this.detailToggleInCanvas);
+    inTex.colorSpace = THREE.NoColorSpace;
+    inTex.minFilter = THREE.LinearMipmapLinearFilter;
+    inTex.magFilter = THREE.LinearFilter;
+    inTex.generateMipmaps = true;
+    inTex.anisotropy = aniso;
+    this.detailToggleInTexture = inTex;
+
+    const outTex = this.createDetailSurfaceTexture(this.detailToggleOutCanvas);
+    outTex.colorSpace = THREE.NoColorSpace;
+    outTex.minFilter = THREE.LinearMipmapLinearFilter;
+    outTex.magFilter = THREE.LinearFilter;
+    outTex.generateMipmaps = true;
+    outTex.anisotropy = aniso;
+    this.detailToggleOutTexture = outTex;
+
+    const geom = new THREE.PlaneGeometry(TOGGLE_PLANE_W, TOGGLE_PLANE_H);
+    const outSetup = this.createMistEtchMaterial(outTex, 293);
+    const outMesh = new THREE.Mesh(geom, outSetup.material);
+    outMesh.renderOrder = 1;
+    outMesh.castShadow = false;
+    outMesh.receiveShadow = false;
+    outMesh.visible = false;
+    outMesh.userData.mistDissolve = outSetup.uniforms;
+    this.detailToggleOutMesh = outMesh;
+    this.detailToggleOutUniforms = outSetup.uniforms;
+
+    const inSetup = this.createMistEtchMaterial(inTex, 263);
+    const inMesh = new THREE.Mesh(geom, inSetup.material);
+    inMesh.renderOrder = 1;
+    inMesh.castShadow = false;
+    inMesh.receiveShadow = false;
+    inMesh.visible = false;
+    inMesh.userData.mistDissolve = inSetup.uniforms;
+    this.detailToggleInMesh = inMesh;
+    this.detailToggleInUniforms = inSetup.uniforms;
+
+    const group = new THREE.Group();
+    group.name = "DetailToggleTrigger";
+    group.visible = false;
+    group.add(outMesh, inMesh);
+    this.detailToggleGroup = group;
+    this.scene.add(group);
+
+    this.redrawDetailToggleCanvas(
+      this.detailToggleInCanvas,
+      this.detailToggleInTexture,
+      false,
+      false,
+    );
+  }
+  private redrawDetailToggleCanvas(
+    canvas: HTMLCanvasElement,
+    texture: THREE.CanvasTexture | undefined,
+    drawerOpen: boolean,
+    hovered: boolean,
+  ) {
+    drawStandaloneDetailToggle(canvas, { drawerOpen, hovered });
+    const targetMesh =
+      texture === this.detailToggleOutTexture
+        ? this.detailToggleOutMesh
+        : this.detailToggleInMesh;
+    if (targetMesh?.material instanceof THREE.MeshBasicMaterial) {
+      targetMesh.material.color.copy(
+        hovered ? DETAIL_TOGGLE_HOVER_COLOR : DETAIL_TOGGLE_INK_COLOR,
+      );
+    }
+    if (texture) {
+      texture.needsUpdate = true;
+      this.renderState.invalidate();
+    }
+  }
+  private handleDetailToggleOpenChange(prevOpen: boolean, nextOpen: boolean) {
+    if (
+      this.detailToggleMode !== "visible" &&
+      this.detailToggleMode !== "reveal"
+    ) {
+      return;
+    }
+    const hovered = this.detailHoveredHotspot === "toggle-detail";
+    this.detailToggleLabelOpen = nextOpen;
+    if (!this.motion.surfaceTransitions) {
+      this.detailToggleSwitchActive = false;
+      if (this.detailToggleOutMesh) this.detailToggleOutMesh.visible = false;
+      this.redrawDetailToggleCanvas(
+        this.detailToggleInCanvas,
+        this.detailToggleInTexture,
+        nextOpen,
+        hovered,
+      );
+      return;
+    }
+    this.redrawDetailToggleCanvas(
+      this.detailToggleOutCanvas,
+      this.detailToggleOutTexture,
+      prevOpen,
+      false,
+    );
+    this.redrawDetailToggleCanvas(
+      this.detailToggleInCanvas,
+      this.detailToggleInTexture,
+      nextOpen,
+      hovered,
+    );
+    this.detailToggleSwitchActive = true;
+    this.detailToggleSwitchElapsed = 0;
+  }
+  private applyStickerPeel(peels: ArrayLike<number>) {
+    if (!this.detailStickerGeom || !this.detailStickerBasePos) return;
+    let changed = false;
+    for (let corner = 0; corner < STICKER_CORNERS.length; corner++) {
+      const p = THREE.MathUtils.clamp(peels[corner] ?? 0, 0, 1);
+      if (Math.abs(p - this.detailStickerLastPeels[corner]) > 0.00001) {
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    for (let corner = 0; corner < STICKER_CORNERS.length; corner++) {
+      this.detailStickerLastPeels[corner] = THREE.MathUtils.clamp(
+        peels[corner] ?? 0,
+        0,
+        1,
+      );
+    }
+    deformStickerGeometry(
+      this.detailStickerGeom,
+      this.detailStickerBasePos,
+      this.detailStickerLastPeels,
+    );
+    this.renderState.invalidate();
+  }
+  private redrawDetailSticker() {
+    if (!this.detailStickerTexture || !this.loaded) return;
+    const record = records[this.selectedIndex];
+    drawIndustrialDieCutSticker(
+      this.detailStickerCanvas,
+      record,
+      this.currentDetailSurfaceState(this.targetDetail > 0),
+    );
+    this.detailStickerTexture.needsUpdate = true;
+    this.renderState.invalidate();
+  }
+  private currentDetailSurfaceState(interactive: boolean): DetailSurfaceState {
+    return {
+      hovered: interactive ? this.detailHoveredHotspot : null,
+      drawerOpen: interactive && this.detailDrawerOpen,
+      copied: interactive && this.detailCopiedRecord !== undefined &&
+        this.detailCopiedRecord === records[this.selectedIndex],
+      scrollY: this.detailCardScrollY,
+      interactive,
+    };
+  }
+  private redrawPulloutCard() {
+    if (!this.detailPulloutTexture || !this.loaded) return;
+    const index = this.selectedIndex;
+    const record = records[index];
+    const stats: Required<ArchiveCardStats> = {
+      sample: "样本不足 · n=1",
+      downloads: 30,
+      comments: 0,
+      ...record?.stats,
+      ...this.cardStatsOverrides.get(index),
+    };
+    const logo = this.getModelProviderLogo(record?.en ?? "");
+    this.detailPulloutLayout = drawPulloutDetailCard(
+      this.detailPulloutCanvas,
+      record,
+      logo,
+      stats,
+      this.currentDetailSurfaceState(this.isDetailBadgeActive()),
+    );
+    if (this.detailCardScrollY > this.detailPulloutLayout.maxScroll) {
+      this.detailCardScrollY = this.detailPulloutLayout.maxScroll;
+    }
+    this.detailPulloutTexture.needsUpdate = true;
+    this.renderState.invalidate();
+  }
+  private scrollDetailCard(delta: number) {
+    const maxScroll = this.detailPulloutLayout?.maxScroll ?? 0;
+    const next = THREE.MathUtils.clamp(this.detailCardScrollY + delta, 0, maxScroll);
+    if (next === this.detailCardScrollY) return;
+    this.detailCardScrollY = next;
+    this.redrawPulloutCard();
+  }
+  private setDetailHover(next: DetailHotspot | null) {
+    if (next === this.detailHoveredHotspot) return;
+    const prev = this.detailHoveredHotspot;
+    this.detailHoveredHotspot = next;
+    // 指针离开贴纸后立刻忘记所在角，避免下一次进入时沿用旧角。
+    if (next !== "note" && next !== "copy-prompt") {
+      this.detailStickerHoverCorner = -1;
+    }
+    if (this.isDetailBadgeActive()) {
+      const isStickerHotspot = (h: DetailHotspot | null) =>
+        h === "note" || h === "copy-prompt";
+      const isToggleHotspot = (h: DetailHotspot | null) =>
+        h === "toggle-detail";
+      const isFaceStatHotspot = (h: DetailHotspot | null) =>
+        h === "cover" ||
+        h === "rating" ||
+        h === "downloads" ||
+        h === "comments";
+      if (isStickerHotspot(prev) || isStickerHotspot(next)) {
+        this.redrawDetailSticker();
+      }
+      if (isToggleHotspot(prev) || isToggleHotspot(next)) {
+        this.redrawDetailToggleCanvas(
+          this.detailToggleInCanvas,
+          this.detailToggleInTexture,
+          this.detailToggleLabelOpen,
+          next === "toggle-detail",
+        );
+      }
+      if (isFaceStatHotspot(prev) || isFaceStatHotspot(next)) {
+        this.drawFullOverviewBadge(this.selectedIndex);
+      }
+      if (this.detailDrawerOpen || this.detailDrawer.value > 0.01) {
+        this.redrawPulloutCard();
+      }
+      this.renderState.invalidate();
+    }
+  }
+  public get isDetailCardOpen() {
+    return this.detailDrawerOpen;
+  }
+  public get detailHover() {
+    return this.detailHoveredHotspot;
+  }
+  public setDetailCardOpen(open: boolean) {
+    const next = Boolean(open) && Boolean(this.targetDetail);
+    if (next === this.detailDrawerOpen) return;
+    const prev = this.detailDrawerOpen;
+    this.detailDrawerOpen = next;
+    this.lastInteraction = this.clock;
+    if (next) {
+      this.redrawPulloutCard();
+    }
+    this.handleDetailToggleOpenChange(prev, next);
+    if (!this.motion.detailTransition) {
+      this.detailDrawer = { value: next ? 1 : 0, velocity: 0 };
+    }
+    this.renderState.invalidate();
+    this.onDetailCardOpenChange?.();
+  }
+  public async copyDetailPrompt() {
+    if (this.disposed || !this.targetDetail) return;
+    const record = records[this.selectedIndex];
+    const text = resolveRecordPrompt(record);
+    if (!text || !(await this.onCopyPrompt?.(text))) return;
+    if (this.disposed || !this.targetDetail || record !== records[this.selectedIndex]) {
+      return;
+    }
+    const redraw = () => {
+      if (!this.isDetailBadgeActive()) return;
+      this.redrawDetailSticker();
+      if (this.detailDrawerOpen || this.detailDrawer.value > 0.01) {
+        this.redrawPulloutCard();
+      }
+    };
+    this.detailCopiedRecord = record;
+    if (this.detailCopiedTimer) window.clearTimeout(this.detailCopiedTimer);
+    this.detailCopiedTimer = window.setTimeout(() => {
+      this.detailCopiedTimer = 0;
+      this.detailCopiedRecord = undefined;
+      if (!this.disposed) redraw();
+    }, 1800);
+    redraw();
+  }
+  private handleDetailHotspotClick(hit: DetailHotspot | null) {
+    if (!hit) return;
+    const record = records[this.selectedIndex];
+    if (hit === "toggle-detail") {
+      this.setDetailCardOpen(!this.detailDrawerOpen);
+      return;
+    }
+    if (hit === "note") {
+      if (!this.detailDrawerOpen) this.setDetailCardOpen(true);
+      return;
+    }
+    if (hit === "card-close") {
+      this.setDetailCardOpen(false);
+      return;
+    }
+    if (hit === "copy-prompt" || hit === "card-copy-prompt") {
+      void this.copyDetailPrompt();
+      return;
+    }
+    if (hit === "card-open-source" || hit === "cover") {
+      const source = record?.source;
+      if (source && /^https?:/i.test(source)) {
+        window.open(source, "_blank", "noopener,noreferrer");
+      }
+    }
+  }
+  private pickDetailHotspot(
+    clientX: number,
+    clientY: number,
+  ): DetailHotspot | null {
+    this.detailStickerHoverCorner = -1;
+    if (!this.loaded || this.modelBounds.isEmpty()) return null;
+    const r = this.canvasRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    this.cursor.set(
+      ((clientX - r.left) / r.width) * 2 - 1,
+      (-(clientY - r.top) / r.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(this.cursor, this.camera);
+
+    if (
+      this.detailDrawerOpen &&
+      this.detailPulloutGroup?.visible &&
+      this.detailDrawer.value > 0.15 &&
+      this.detailPulloutLayout
+    ) {
+      this.detailPulloutGroup.updateMatrixWorld(true);
+      if (
+        Math.abs(this.detailPulloutGroup.matrixWorld.determinant()) >= 1e-12
+      ) {
+        this.pickInvMatrix.copy(this.detailPulloutGroup.matrixWorld).invert();
+        this.pickLocalRay
+          .copy(this.raycaster.ray)
+          .applyMatrix4(this.pickInvMatrix);
+        this.detailPickPlane.set(new THREE.Vector3(0, 0, 1), -0.003);
+        if (
+          this.pickLocalRay.direction.z < -0.15 &&
+          this.pickLocalRay.intersectPlane(
+            this.detailPickPlane,
+            this.detailPickPoint,
+          ) &&
+          Math.abs(this.detailPickPoint.x) <= PULLOUT_CARD_W / 2 &&
+          Math.abs(this.detailPickPoint.y) <= PULLOUT_CARD_H / 2
+        ) {
+          const cx =
+            ((this.detailPickPoint.x + PULLOUT_CARD_W / 2) / PULLOUT_CARD_W) *
+            PULLOUT_CANVAS_W;
+          const cy =
+            ((PULLOUT_CARD_H / 2 - this.detailPickPoint.y) / PULLOUT_CARD_H) *
+            PULLOUT_CANVAS_H;
+          this.detailPickPoint.applyMatrix4(this.detailPulloutGroup.matrixWorld);
+          if (this.detailClipPlane.distanceToPoint(this.detailPickPoint) >= 0) {
+            return hitTestPulloutCard(cx, cy, this.detailPulloutLayout) ?? "card-body";
+          }
+        }
+      }
+    }
+
+    if (this.detailStickerGroup && this.detailStickerGroup.visible) {
+      this.detailStickerGroup.updateMatrixWorld(true);
+      if (
+        Math.abs(this.detailStickerGroup.matrixWorld.determinant()) >= 1e-12
+      ) {
+        this.pickInvMatrix.copy(this.detailStickerGroup.matrixWorld).invert();
+        this.pickLocalRay
+          .copy(this.raycaster.ray)
+          .applyMatrix4(this.pickInvMatrix);
+        this.detailPickPlane.set(new THREE.Vector3(0, 0, 1), 0);
+        if (
+          this.pickLocalRay.direction.z < -0.15 &&
+          this.pickLocalRay.intersectPlane(
+            this.detailPickPlane,
+            this.detailPickPoint,
+          ) &&
+          Math.abs(this.detailPickPoint.x) <= STICKER_W / 2 &&
+          Math.abs(this.detailPickPoint.y) <= STICKER_H / 2
+        ) {
+          const sx =
+            ((this.detailPickPoint.x + STICKER_W / 2) / STICKER_W) *
+            STICKER_CANVAS_W;
+          const sy =
+            ((STICKER_H / 2 - this.detailPickPoint.y) / STICKER_H) *
+            STICKER_CANVAS_H;
+          this.detailStickerHoverCorner = stickerCornerAt(
+            this.detailPickPoint.x,
+            this.detailPickPoint.y,
+          );
+          return hitTestStickerFace(
+            sx,
+            sy,
+            Boolean(resolveRecordPrompt(records[this.selectedIndex])),
+          );
+        }
+      }
+    }
+
+    this.model.updateMatrixWorld(true);
+    if (Math.abs(this.model.matrixWorld.determinant()) < 1e-12) return null;
+    this.pickInvMatrix.copy(this.model.matrixWorld).invert();
+    this.pickLocalRay.copy(this.raycaster.ray).applyMatrix4(this.pickInvMatrix);
+    this.detailPickPlane.set(new THREE.Vector3(0, 0, 1), -this.glassFrontZ);
+    if (
+      this.pickLocalRay.direction.z >= -0.15 ||
+      !this.pickLocalRay.intersectPlane(
+        this.detailPickPlane,
+        this.detailPickPoint,
+      )
+    ) {
+      return null;
+    }
+    const localX = this.detailPickPoint.x;
+    const localY = this.detailPickPoint.y;
+    if (localX < -2.362 || localX > 2.362 || localY < 0.139 || localY > 3.565) {
+      return null;
+    }
+    const px = ((localX + 2.362) / 4.724) * OVERVIEW_BADGE_WIDTH;
+    const py = ((3.565 - localY) / 3.426) * OVERVIEW_BADGE_HEIGHT;
+    const hit = hitTestDetailFace(px, py, this.lastShowcaseStatRects);
+    if (
+      hit === "toggle-detail" &&
+      !(
+        this.targetDetail > 0 &&
+        (this.detailToggleMode === "visible" ||
+          (this.detailToggleMode === "reveal" &&
+            this.detailToggleVisibility > 0.35))
+      )
+    ) {
+      return null;
+    }
+    return hit;
+  }
   private captureFixedDetailCameraEntry() {
     this.camera.updateMatrixWorld(true);
     const offset = this.camera.position.clone().sub(this.cameraAim);
@@ -1962,9 +3243,7 @@ export class ArchiveScene {
       this.camera.quaternion,
     );
     const roll = Math.atan2(-cameraUp.dot(baseRight), cameraUp.dot(baseUp));
-    const tanHalfFov = Math.tan(
-      THREE.MathUtils.degToRad(this.camera.fov) / 2,
-    );
+    const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2);
     this.fixedDetailCameraPose = {
       aim: this.cameraAim.clone(),
       azimuth,
@@ -2069,15 +3348,16 @@ export class ArchiveScene {
       this.model.scale,
     );
     const { min, max } = this.modelBounds;
+    const effectiveMaxX = max.x + 4.35 * basis.drawer;
     const corners = [
       [min.x, min.y, min.z],
       [min.x, min.y, max.z],
       [min.x, max.y, min.z],
       [min.x, max.y, max.z],
-      [max.x, min.y, min.z],
-      [max.x, min.y, max.z],
-      [max.x, max.y, min.z],
-      [max.x, max.y, max.z],
+      [effectiveMaxX, min.y, min.z],
+      [effectiveMaxX, min.y, max.z],
+      [effectiveMaxX, max.y, min.z],
+      [effectiveMaxX, max.y, max.z],
     ] as const;
     const terminalPoints = corners.map(([x, y, z]) =>
       new THREE.Vector3(x, y, z).applyMatrix4(terminalMatrix),
@@ -2086,11 +3366,9 @@ export class ArchiveScene {
       .setFromPoints(terminalPoints)
       .getCenter(new THREE.Vector3());
     const targetCameraOffset = new THREE.Vector3(
-      -Math.sin(DETAIL_TARGET_AZIMUTH) *
-        Math.cos(DETAIL_TARGET_ELEVATION),
+      -Math.sin(DETAIL_TARGET_AZIMUTH) * Math.cos(DETAIL_TARGET_ELEVATION),
       Math.sin(DETAIL_TARGET_ELEVATION),
-      Math.cos(DETAIL_TARGET_AZIMUTH) *
-        Math.cos(DETAIL_TARGET_ELEVATION),
+      Math.cos(DETAIL_TARGET_AZIMUTH) * Math.cos(DETAIL_TARGET_ELEVATION),
     ).normalize();
     const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
       new THREE.Matrix4().lookAt(
@@ -2108,17 +3386,21 @@ export class ArchiveScene {
       .normalize();
     const aspect = Math.max(0.01, basis.aspect);
     const portraitBlend = THREE.MathUtils.smoothstep(aspect, 0.9, 1.45);
+    const expandedCenterX = THREE.MathUtils.lerp(
+      DETAIL_FRAME_CENTER_X,
+      0.5,
+      basis.drawer,
+    );
     const frameCenterX = THREE.MathUtils.lerp(
       0.5,
-      DETAIL_FRAME_CENTER_X,
+      expandedCenterX,
       portraitBlend,
     );
     const targetX = frameCenterX * 2 - 1;
     const targetY = 1 - DETAIL_FRAME_CENTER_Y * 2;
     const targetHeight = DETAIL_FRAME_HEIGHT * 2;
     const edgeSafeFrameWidth =
-      Math.min(frameCenterX, 1 - frameCenterX) * 2 -
-      DETAIL_FRAME_EDGE_SAFE * 2;
+      Math.min(frameCenterX, 1 - frameCenterX) * 2 - DETAIL_FRAME_EDGE_SAFE * 2;
     const targetWidth =
       Math.min(DETAIL_FRAME_ABSOLUTE_MAX_WIDTH, edgeSafeFrameWidth) * 2;
     const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(entry.fov) / 2);
@@ -2171,8 +3453,8 @@ export class ArchiveScene {
     let low = 18;
     let high = 120;
     let highFrame = frameAtDistance(high);
-    for (let pass = 0; pass < 4 && !fits(highFrame.metrics); pass++) {
-      high = Math.min(high + 25, 220);
+    for (let pass = 0; pass < 6 && !fits(highFrame.metrics); pass++) {
+      high = Math.min(high + 25, 260);
       highFrame = frameAtDistance(high);
     }
     if (!fits(highFrame.metrics)) return undefined;
@@ -2207,7 +3489,8 @@ export class ArchiveScene {
       Math.abs(previous.x - next.x) > 0.015 ||
       Math.abs(previous.y - next.y) > 0.04 ||
       Math.abs(previous.z - next.z) > 0.015 ||
-      Math.abs(previous.aspect - next.aspect) > 0.0001
+      Math.abs(previous.aspect - next.aspect) > 0.0001 ||
+      Math.abs(previous.drawer - next.drawer) > 0.001
     );
   }
 
@@ -2238,16 +3521,44 @@ export class ArchiveScene {
     this.lastInteraction = this.clock;
     this.targetReveal = 1;
     this.targetDetail = mode === "detail" ? 1 : 0;
+    this.redrawDetailSticker();
     this.dragging = false;
     if (mode !== "detail") {
+      this.setDetailCardOpen(false);
+      this.detailCardScrollY = 0;
+      this.setDetailHover(null);
+      this.detailToggleSwitchActive = false;
+      if (this.detailToggleOutMesh) this.detailToggleOutMesh.visible = false;
+      if (
+        this.detailToggleMode === "visible" ||
+        this.detailToggleMode === "reveal"
+      ) {
+        if (!this.motion.surfaceTransitions) {
+          this.detailToggleMode = "hidden";
+          this.detailToggleVisibility = 0;
+          this.detailToggleLabelOpen = false;
+          if (this.detailToggleGroup) this.detailToggleGroup.visible = false;
+        } else {
+          this.detailToggleMode = "hide";
+          this.detailToggleDuration = MIST_HIDE_DURATION_MS / 1000;
+          this.detailToggleElapsed =
+            (1 - this.detailToggleVisibility) * this.detailToggleDuration;
+        }
+      }
       this.targetRotation = 0;
       if (this.rotation !== 0) this.returnY = this.model.position.y;
     } else this.returnY = null;
   }
   // Legacy review pages use the old whole-scene toggle.
-  setReduced(value: boolean) { this.setMotion(value ? reducedMotion() : fullMotion()); }
+  setReduced(value: boolean) {
+    this.setMotion(value ? reducedMotion() : fullMotion());
+  }
   setMotion(value: MotionPreferences) {
-    if ((!value.pointerParallax || !value.dragMomentum) && (this.motion.pointerParallax || this.motion.dragMomentum)) this.cancelPointer();
+    if (
+      (!value.pointerParallax || !value.dragMomentum) &&
+      (this.motion.pointerParallax || this.motion.dragMomentum)
+    )
+      this.cancelPointer();
     if (!value.dragMomentum) {
       this.archiveMomentum = null;
       this.columnCamera.velocity = 0;
@@ -2263,6 +3574,27 @@ export class ArchiveScene {
       this.introRelease = null;
     }
     if (!value.idleWave) this.idleGain = 0;
+    if (!value.surfaceTransitions) {
+      if (this.detailToggleMode === "reveal") {
+        this.detailToggleMode = "visible";
+        this.detailToggleVisibility = 1;
+      } else if (this.detailToggleMode === "hide") {
+        this.detailToggleMode = "hidden";
+        this.detailToggleVisibility = 0;
+        this.detailToggleLabelOpen = false;
+        if (this.detailToggleGroup) this.detailToggleGroup.visible = false;
+      }
+      if (this.detailToggleSwitchActive) {
+        this.detailToggleSwitchActive = false;
+        if (this.detailToggleOutMesh) this.detailToggleOutMesh.visible = false;
+        this.redrawDetailToggleCanvas(
+          this.detailToggleInCanvas,
+          this.detailToggleInTexture,
+          this.detailToggleLabelOpen,
+          this.detailHoveredHotspot === "toggle-detail",
+        );
+      }
+    }
     this.motion = { ...value };
   }
   setQuality(value: RenderQuality | boolean) {
@@ -2297,6 +3629,12 @@ export class ArchiveScene {
       this.overviewBadgeTexture,
       this.labelTexture,
       this.hoverBadgeFallback,
+      this.detailPulloutTexture,
+      this.detailStickerTexture,
+      this.detailStickerBackTexture,
+      this.detailStickerShadowTexture,
+      this.detailToggleInTexture,
+      this.detailToggleOutTexture,
     ]) {
       if (tex && tex.anisotropy !== badgeAnisotropy) {
         tex.anisotropy = badgeAnisotropy;
@@ -2307,6 +3645,7 @@ export class ArchiveScene {
       this.overviewHeaderCache,
       this.overviewFullCache,
       this.hoverBadgeCache,
+      this.hoverStickerCache,
     ]) {
       for (const entry of cache.values()) {
         if (entry.texture.anisotropy !== badgeAnisotropy) {
@@ -2334,7 +3673,8 @@ export class ArchiveScene {
           ? Math.round((this.selectedCell.lane - 2) / lanePeriod) * lanePeriod
           : 0,
       // Lookups retain the row origin modulo each column's own period.
-      row: Math.abs(this.selectedCell.row) > 2048 ? this.selectedCell.row - 12 : 0,
+      row:
+        Math.abs(this.selectedCell.row) > 2048 ? this.selectedCell.row - 12 : 0,
     };
     if (!shift.lane && !shift.row) return;
     this.setHover(null);
@@ -2348,6 +3688,10 @@ export class ArchiveScene {
     this.slotUnderlights.rebase(shift.lane, shift.row);
     this.coordinateOrigin.lane += shift.lane;
     this.coordinateOrigin.row += shift.row;
+    if (this.hoverStickerCell) {
+      this.hoverStickerCell.lane -= shift.lane;
+      this.hoverStickerCell.row -= shift.row;
+    }
     this.laneFocus.value -= shift.lane;
     this.shoulder.value -= shift.row;
     this.columnCamera.value -= shift.lane * COLUMN_SPACING;
@@ -2390,14 +3734,20 @@ export class ArchiveScene {
     this.selectedIndex = index;
     const next = fileLocation(index).slot;
     const previousCell = this.selectedCell;
-    const cell = selectionCell(index, previousCell, navigation, this.coordinateOrigin.row);
+    const cell = selectionCell(
+      index,
+      previousCell,
+      navigation,
+      this.coordinateOrigin.row,
+    );
     const changed = !sameCell(cell, previousCell);
     if (changed && this.intro) this.finishIntro(false, true);
-    const sameColumnRowSwitch =
-      changed && cell.lane === previousCell.lane;
+    const sameColumnRowSwitch = changed && cell.lane === previousCell.lane;
     if (
-      changed && this.loaded &&
-      (Math.abs(this.lift.value) >= MIN_OUTGOING_SPAWN_LIFT || this.rotation !== 0)
+      changed &&
+      this.loaded &&
+      (Math.abs(this.lift.value) >= MIN_OUTGOING_SPAWN_LIFT ||
+        this.rotation !== 0)
     ) {
       while (this.outgoing.length >= MAX_OUTGOING_POOL) {
         let evictIndex = -1;
@@ -2468,12 +3818,20 @@ export class ArchiveScene {
     if (index !== this.overviewBadgeFullIndex) {
       this.overviewBadgeFullDirty = true;
     }
-    if (indexChanged) this.overviewBadgeFullAfter = this.clock + OVERVIEW_BADGE_SETTLE_SECONDS;
+    if (indexChanged) {
+      this.setDetailCardOpen(false);
+      this.detailCardScrollY = 0;
+      this.detailHoveredHotspot = null;
+      this.overviewBadgeFullAfter = this.clock + OVERVIEW_BADGE_SETTLE_SECONDS;
+    }
     if (this.isDetailBadgeActive()) {
       this.ensureFullOverviewBadge(index);
       this.overviewBadgeDirty = false;
     } else {
       this.overviewBadgeDirty = true;
+    }
+    if (indexChanged && this.loaded) {
+      this.redrawDetailSticker();
     }
   }
   public reloadData(nextIndex = 0, options: { animate?: boolean } = {}) {
@@ -2499,6 +3857,19 @@ export class ArchiveScene {
     this.cardPhotoSrc.clear();
     this.cardPhotoTokens.clear();
     this.cardStatsOverrides.clear();
+    this.setDetailCardOpen(false);
+    this.detailDrawer = { value: 0, velocity: 0 };
+    this.detailCardScrollY = 0;
+    this.detailHoveredHotspot = null;
+    this.detailPulloutLayout = null;
+    for (let corner = 0; corner < this.detailStickerCornerPeel.length; corner++) {
+      const spring = this.detailStickerCornerPeel[corner];
+      spring.value = corner === STICKER_REST_CORNER ? 0.24 : 0;
+      spring.velocity = 0;
+    }
+    this.detailStickerHoverCorner = -1;
+    if (this.detailPulloutGroup) this.detailPulloutGroup.visible = false;
+    if (this.detailStickerGroup) this.detailStickerGroup.visible = false;
     this.overviewBadgeUniform.value = this.overviewBadgeTexture;
     this.overviewBadgeHeightFraction.value = 1;
     for (const entry of this.overviewHeaderCache.values()) {
@@ -2521,6 +3892,17 @@ export class ArchiveScene {
       entry.texture.dispose();
     }
     this.hoverBadgeCache.clear();
+    this.hoverStickerCell = null;
+    this.hoverStickerIndex = -1;
+    if (this.hoverStickerGroup) this.hoverStickerGroup.visible = false;
+    if (this.hoverStickerFrontMat) {
+      this.hoverStickerFrontMat.map = null;
+      this.hoverStickerFrontMat.emissiveMap = null;
+    }
+    for (const entry of this.hoverStickerCache.values()) {
+      entry.texture.dispose();
+    }
+    this.hoverStickerCache.clear();
 
     const loc = fileLocation(target);
     this.selectedIndex = target;
@@ -2549,6 +3931,7 @@ export class ArchiveScene {
       }
       if (this.isDetailBadgeActive()) this.ensureFullOverviewBadge(target);
       else this.bindOverviewFullBadge(target);
+      this.redrawDetailSticker();
     }
     this.renderState.invalidate();
   }
@@ -2597,6 +3980,14 @@ export class ArchiveScene {
     if (this.hoverBadgeIndex === index) {
       this.hoverBadgeIndex = -1;
     }
+    const cachedSticker = this.hoverStickerCache.get(index);
+    if (cachedSticker) {
+      cachedSticker.texture.dispose();
+      this.hoverStickerCache.delete(index);
+    }
+    if (this.hoverStickerIndex === index) {
+      this.hoverStickerIndex = -1;
+    }
     if (index === this.overviewBadgeFullIndex) {
       this.overviewBadgeFullDirty = true;
     }
@@ -2604,6 +3995,13 @@ export class ArchiveScene {
       this.overviewBadgeDirty = true;
       if (this.intro) this.pendingOverviewBadgeRefresh = true;
       else this.flushOverviewBadge();
+      this.redrawDetailSticker();
+      if (
+        this.isDetailBadgeActive() &&
+        (this.detailDrawerOpen || this.detailDrawer.value > 0.01)
+      ) {
+        this.redrawPulloutCard();
+      }
     }
     this.renderState.invalidate();
   }
@@ -2617,9 +4015,7 @@ export class ArchiveScene {
     this.frozenPulses.push(
       ...this.pulses.map((pulse) => ({ ...pulse, stoppedAt })),
     );
-    this.frozenPulses = this.frozenPulses.slice(
-      -MAX_FROZEN_SELECTION_PULSES,
-    );
+    this.frozenPulses = this.frozenPulses.slice(-MAX_FROZEN_SELECTION_PULSES);
     this.pulses = [];
   }
   private createOutgoingGroup() {
@@ -2659,10 +4055,7 @@ export class ArchiveScene {
   }
   private releaseOutgoingGroup(group: THREE.Group) {
     this.scene.remove(group);
-    if (
-      this.bakedCardTexture &&
-      this.outgoingPool.length < MAX_OUTGOING_POOL
-    ) {
+    if (this.bakedCardTexture && this.outgoingPool.length < MAX_OUTGOING_POOL) {
       group.visible = false;
       this.outgoingPool.push(group);
       return;
@@ -2679,7 +4072,10 @@ export class ArchiveScene {
     // still render rather than throw on an undefined title.
     const record = records[index];
     const title = (record?.en || record?.title || "").trim();
-    const fallback = String(Math.max(0, Math.floor(index)) + 1).padStart(3, "0");
+    const fallback = String(Math.max(0, Math.floor(index)) + 1).padStart(
+      3,
+      "0",
+    );
     const code = (record?.id || "X-" + fallback).replace(/^X-/, "").trim();
     const c = this.labelCanvas.getContext("2d");
     if (!c) return;
@@ -2880,7 +4276,7 @@ export class ArchiveScene {
     sampleY: number,
     metricsY: number,
     hasPhoto: boolean,
-  ) {
+  ): ShowcaseStatRects {
     const stats = {
       sample: "样本不足 · n=1",
       downloads: 30,
@@ -2897,11 +4293,17 @@ export class ArchiveScene {
     ] as const;
     const iconWidth = iconSize + iconGap;
     const gaps = metricGap * (metrics.length - 1);
-    const maxMetricText = ((right - left) * 0.62 - gaps) / metrics.length - iconWidth;
+    const maxMetricText =
+      ((right - left) * 0.62 - gaps) / metrics.length - iconWidth;
     const labels = metrics.map(([kind, count]) => {
       c.font = "600 46px MiSans, sans-serif";
       const text = fitOneLine(c, String(count), maxMetricText);
-      return { kind, text, font: c.font, width: iconWidth + c.measureText(text).width };
+      return {
+        kind,
+        text,
+        font: c.font,
+        width: iconWidth + c.measureText(text).width,
+      };
     });
     let x = right - gaps - labels.reduce((sum, label) => sum + label.width, 0);
 
@@ -2918,8 +4320,12 @@ export class ArchiveScene {
     }
     c.font = "500 44px MiSans, sans-serif";
     const sample = fitOneLine(c, stats.sample, (right - left) * 0.54);
+    const sampleWidth = c.measureText(sample).width;
     if (hasPhoto) c.strokeText(sample, left, sampleY);
     c.fillText(sample, left, sampleY);
+    const statRects: ShowcaseStatRects = {
+      rating: { x: left, y: sampleY - 26, w: sampleWidth, h: 52 },
+    };
     for (const label of labels) {
       this.drawMetricIcon(
         c,
@@ -2933,15 +4339,25 @@ export class ArchiveScene {
       const textX = x + iconWidth;
       if (hasPhoto) c.strokeText(label.text, textX, metricsY);
       c.fillText(label.text, textX, metricsY);
+      const box: RectBox = {
+        x,
+        y: metricsY - 26,
+        w: label.width,
+        h: 52,
+      };
+      if (label.kind === "download") statRects.downloads = box;
+      else statRects.comments = box;
       x += label.width + metricGap;
     }
+    return statRects;
   }
 
   private getModelProviderLogo(model: string) {
     const provider = modelProvider(model);
     if (!provider) return;
     const cached = this.modelProviderImages.get(provider);
-    if (cached) return cached.complete && cached.naturalWidth > 0 ? cached : undefined;
+    if (cached)
+      return cached.complete && cached.naturalWidth > 0 ? cached : undefined;
 
     const image = new Image();
     this.modelProviderImages.set(provider, image);
@@ -2967,6 +4383,9 @@ export class ArchiveScene {
         this.pendingOverviewBadgeRefresh = true;
       } else if (this.isDetailBadgeActive()) {
         this.drawFullOverviewBadge(this.selectedIndex);
+        if (this.detailDrawerOpen || this.detailDrawer.value > 0.01) {
+          this.redrawPulloutCard();
+        }
         this.overviewBadgeDirty = false;
         this.renderState.invalidate();
       } else {
@@ -2988,9 +4407,7 @@ export class ArchiveScene {
     c.textBaseline = "alphabetic";
 
     const textX = 139;
-    const textWidth = showModel
-      ? BURN_STAMP_RIGHT - BURN_STAMP_WIDTH - BURN_STAMP_GAP - textX
-      : OVERVIEW_BADGE_WIDTH - 2 * textX;
+    const textWidth = FACE_NOTE_RECT.x - ARCHIVAL_NOTE_GAP - textX;
     const titleTop = 44;
     c.fillStyle = WARM.ink;
     c.font = "bold 92px MiSans, sans-serif";
@@ -3016,40 +4433,10 @@ export class ArchiveScene {
       const logoTop = modelBottom + 24;
       const scale = Math.min(248 / logo.naturalWidth, 120 / logo.naturalHeight);
       const logoHeight = logo.naturalHeight * scale;
-      c.drawImage(
-        logo,
-        textX,
-        logoTop,
-        logo.naturalWidth * scale,
-        logoHeight,
-      );
+      c.drawImage(logo, textX, logoTop, logo.naturalWidth * scale, logoHeight);
       headingBottom = logoTop + logoHeight;
     }
     return headingBottom;
-  }
-
-  private drawBurnStamp(c: CanvasRenderingContext2D, index: number) {
-    const burnTime = records[index]?.date?.trim() || "0000-00-00";
-    const x = BURN_STAMP_RIGHT - BURN_STAMP_WIDTH;
-    c.save();
-    c.textAlign = "right";
-    c.textBaseline = "alphabetic";
-    c.fillStyle = WARM.ink;
-    c.font = "600 44px MiSans, sans-serif";
-    c.fillText(
-      fitOneLine(c, `刻录时间：${burnTime}`, BURN_STAMP_WIDTH),
-      BURN_STAMP_RIGHT,
-      126,
-    );
-    drawCode39Barcode(
-      c,
-      burnTime,
-      x,
-      BURN_STAMP_TOP,
-      BURN_STAMP_WIDTH,
-      BURN_STAMP_HEIGHT,
-    );
-    c.restore();
   }
 
   private drawHoverBadge(index: number) {
@@ -3107,7 +4494,8 @@ export class ArchiveScene {
       this.loadCardPhoto(cover, index, false);
     }
     const provider = modelProvider(record?.en ?? "");
-    const providerReady = !provider || Boolean(this.getModelProviderLogo(record?.en ?? ""));
+    const providerReady =
+      !provider || Boolean(this.getModelProviderLogo(record?.en ?? ""));
     let entry = this.overviewHeaderCache.get(index);
     if (entry && (!provider || entry.providerLoaded || !providerReady)) {
       this.overviewHeaderCache.delete(index);
@@ -3158,11 +4546,14 @@ export class ArchiveScene {
     c.setTransform(OVERVIEW_HEADER_SCALE, 0, 0, OVERVIEW_HEADER_SCALE, 0, 0);
     c.clearRect(0, 0, OVERVIEW_BADGE_WIDTH, OVERVIEW_HEADER_HEIGHT);
     const headingBottom = this.drawOverviewHeading(c, index, true);
-    this.drawBurnStamp(c, index);
+    const noteBottom = drawDetailToggleTrigger(
+      c,
+      this.currentDetailSurfaceState(false),
+    );
     c.restore();
     const headingEdge = Math.min(
       OVERVIEW_HEADER_HEIGHT - 2,
-      Math.max(headingBottom + 20, BURN_STAMP_TOP + BURN_STAMP_HEIGHT + 20),
+      Math.max(headingBottom + 20, noteBottom + 16),
     );
     entry.headingEdge = 1 - headingEdge / OVERVIEW_BADGE_HEIGHT;
     entry.providerLoaded = providerReady;
@@ -3181,7 +4572,8 @@ export class ArchiveScene {
       this.loadCardPhoto(cover, index, false);
     }
     const provider = modelProvider(record?.en ?? "");
-    const providerReady = !provider || Boolean(this.getModelProviderLogo(record?.en ?? ""));
+    const providerReady =
+      !provider || Boolean(this.getModelProviderLogo(record?.en ?? ""));
     const photo = this.cardPhotos.get(index);
     const hasPhoto = Boolean(photo?.naturalWidth && photo.naturalHeight);
     let entry = this.overviewFullCache.get(index);
@@ -3209,7 +4601,9 @@ export class ArchiveScene {
       if (!entry) {
         const canvas = document.createElement("canvas");
         canvas.width = Math.round(OVERVIEW_BADGE_WIDTH * OVERVIEW_SETTLE_SCALE);
-        canvas.height = Math.round(OVERVIEW_BADGE_HEIGHT * OVERVIEW_SETTLE_SCALE);
+        canvas.height = Math.round(
+          OVERVIEW_BADGE_HEIGHT * OVERVIEW_SETTLE_SCALE,
+        );
         const texture = new THREE.CanvasTexture(canvas);
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.anisotropy = this.badgeAnisotropy();
@@ -3264,9 +4658,13 @@ export class ArchiveScene {
   private flushOverviewBadge() {
     if (this.intro || !this.overviewBadgeTexture) return;
     if (this.isDetailBadgeActive()) {
-      if (!this.overviewBadgeDirty && !this.overviewBadgeFullDirty &&
+      if (
+        !this.overviewBadgeDirty &&
+        !this.overviewBadgeFullDirty &&
         this.overviewBadgeFullIndex === this.selectedIndex &&
-        this.overviewBadgeUniform.value === this.overviewBadgeTexture) return;
+        this.overviewBadgeUniform.value === this.overviewBadgeTexture
+      )
+        return;
       this.overviewBadgeDirty = false;
       this.ensureFullOverviewBadge(this.selectedIndex);
       return;
@@ -3309,7 +4707,10 @@ export class ArchiveScene {
     c.setTransform(scale, 0, 0, scale, 0, 0);
     c.clearRect(0, 0, OVERVIEW_BADGE_WIDTH, OVERVIEW_BADGE_HEIGHT);
     const headingBottom = this.drawOverviewHeading(c, index, true);
-    this.drawBurnStamp(c, index);
+    const interactive =
+      canvas === this.overviewBadgeCanvas && this.isDetailBadgeActive();
+    const surfaceState = this.currentDetailSurfaceState(interactive);
+    const noteBottom = drawDetailToggleTrigger(c, surfaceState);
     // 2. Middle Replaceable Showcase Photo, expanded to the card margins.
     const px = 48;
     const py = 386;
@@ -3317,7 +4718,7 @@ export class ArchiveScene {
     const ph = 1032;
     const headingEdge = Math.min(
       py - 2,
-      Math.max(headingBottom + 20, BURN_STAMP_TOP + BURN_STAMP_HEIGHT + 20),
+      Math.max(headingBottom + 20, noteBottom + 16),
     );
     const headingEdgeNormalized = 1 - headingEdge / OVERVIEW_BADGE_HEIGHT;
     const photo = this.cardPhotos.get(index);
@@ -3327,7 +4728,10 @@ export class ArchiveScene {
     c.rect(px, py, pw, ph);
     c.clip();
     if (photo && hasPhoto) {
-      const fitScale = Math.max(pw / photo.naturalWidth, ph / photo.naturalHeight);
+      const fitScale = Math.max(
+        pw / photo.naturalWidth,
+        ph / photo.naturalHeight,
+      );
       const dw = photo.naturalWidth * fitScale;
       const dh = photo.naturalHeight * fitScale;
       c.imageSmoothingEnabled = true;
@@ -3379,9 +4783,13 @@ export class ArchiveScene {
       c.textBaseline = "middle";
       c.fillStyle = "#7a6f62";
       c.font = "500 28px MiSans, sans-serif";
-      c.fillText("SHOWCASE PHOTO  ·  可替换展示照片", px + pw / 2, py + ph * 0.46);
+      c.fillText(
+        "SHOWCASE PHOTO  ·  可替换展示照片",
+        px + pw / 2,
+        py + ph * 0.46,
+      );
     }
-    this.drawShowcaseStats(
+    const statRects = this.drawShowcaseStats(
       c,
       index,
       px + 64,
@@ -3391,6 +4799,10 @@ export class ArchiveScene {
       hasPhoto,
     );
     c.restore();
+    if (scale === OVERVIEW_BADGE_SCALE) {
+      this.lastShowcaseStatRects = statRects;
+    }
+    drawFaceHoverAccents(c, surfaceState, FACE_COVER_RECT, statRects, hasPhoto);
 
     c.restore();
     return headingEdgeNormalized;
@@ -3416,41 +4828,70 @@ export class ArchiveScene {
   private ensureInstanceCapacity(required: number) {
     if (!this.instances.length || required <= this.instanceCapacity) return;
     const capacity = Math.max(required, this.instanceCapacity * 2);
-    const matrix = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 16), 16).setUsage(THREE.DynamicDrawUsage);
+    const matrix = new THREE.InstancedBufferAttribute(
+      new Float32Array(capacity * 16),
+      16,
+    ).setUsage(THREE.DynamicDrawUsage);
     matrix.array.set(this.instances[0].instanceMatrix.array);
     for (const inst of this.instances) {
       inst.dispose();
       inst.instanceMatrix = matrix;
     }
     const previousSlotLight = this.slotLightAttribute;
-    this.slotLightAttribute = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
-    if (previousSlotLight) this.slotLightAttribute.array.set(previousSlotLight.array);
+    this.slotLightAttribute = new THREE.InstancedBufferAttribute(
+      new Float32Array(capacity),
+      1,
+    ).setUsage(THREE.DynamicDrawUsage);
+    if (previousSlotLight)
+      this.slotLightAttribute.array.set(previousSlotLight.array);
     const previousNeighborLight = this.neighborLightAttribute;
-    this.neighborLightAttribute = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
-    if (previousNeighborLight) this.neighborLightAttribute.array.set(previousNeighborLight.array);
+    this.neighborLightAttribute = new THREE.InstancedBufferAttribute(
+      new Float32Array(capacity),
+      1,
+    ).setUsage(THREE.DynamicDrawUsage);
+    if (previousNeighborLight)
+      this.neighborLightAttribute.array.set(previousNeighborLight.array);
     const previousLateralLight = this.lateralLightAttribute;
-    this.lateralLightAttribute = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
-    if (previousLateralLight) this.lateralLightAttribute.array.set(previousLateralLight.array);
+    this.lateralLightAttribute = new THREE.InstancedBufferAttribute(
+      new Float32Array(capacity),
+      1,
+    ).setUsage(THREE.DynamicDrawUsage);
+    if (previousLateralLight)
+      this.lateralLightAttribute.array.set(previousLateralLight.array);
     const previousTopRailLight = this.topRailLightAttribute;
-    this.topRailLightAttribute = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage);
-    if (previousTopRailLight) this.topRailLightAttribute.array.set(previousTopRailLight.array);
+    this.topRailLightAttribute = new THREE.InstancedBufferAttribute(
+      new Float32Array(capacity),
+      1,
+    ).setUsage(THREE.DynamicDrawUsage);
+    if (previousTopRailLight)
+      this.topRailLightAttribute.array.set(previousTopRailLight.array);
     for (const inst of this.instances) {
       inst.geometry.setAttribute("archiveSlotLight", this.slotLightAttribute);
-      inst.geometry.setAttribute("archiveSlotReflection", this.neighborLightAttribute);
-      inst.geometry.setAttribute("archiveSlotLateral", this.lateralLightAttribute);
-      inst.geometry.setAttribute("archiveSlotTopRail", this.topRailLightAttribute);
+      inst.geometry.setAttribute(
+        "archiveSlotReflection",
+        this.neighborLightAttribute,
+      );
+      inst.geometry.setAttribute(
+        "archiveSlotLateral",
+        this.lateralLightAttribute,
+      );
+      inst.geometry.setAttribute(
+        "archiveSlotTopRail",
+        this.topRailLightAttribute,
+      );
     }
     this.matrixUpdates = new InstanceUpdates(matrix);
     this.slotLightUpdates = new InstanceUpdates(this.slotLightAttribute);
-    this.neighborLightUpdates = new InstanceUpdates(this.neighborLightAttribute);
+    this.neighborLightUpdates = new InstanceUpdates(
+      this.neighborLightAttribute,
+    );
     this.lateralLightUpdates = new InstanceUpdates(this.lateralLightAttribute);
     this.topRailLightUpdates = new InstanceUpdates(this.topRailLightAttribute);
     this.instanceCapacity = capacity;
   }
   private get useCleanEcoBudget() {
     return (
-      !this.superPerformance &&
-      matchingPreset(this.quality) === "original"
+      !this.superPerformance && matchingPreset(this.quality) === "original"
     );
   }
   private shouldEnableBokeh() {
@@ -3470,8 +4911,7 @@ export class ArchiveScene {
     ) {
       return this.cachedCanvasRect;
     }
-    this.cachedCanvasRect =
-      this.renderer.domElement.getBoundingClientRect();
+    this.cachedCanvasRect = this.renderer.domElement.getBoundingClientRect();
     return this.cachedCanvasRect;
   }
   resize() {
@@ -3647,20 +5087,27 @@ export class ArchiveScene {
       : SELECTED_ROW_ANCHOR_Z - (coordinate - 15.5) * ROW_SPACING;
   }
   private navigatePlane(coordinate: DragPosition) {
-    const goal = { lane: Math.round(coordinate.lane), row: Math.round(coordinate.row) };
+    const goal = {
+      lane: Math.round(coordinate.lane),
+      row: Math.round(coordinate.row),
+    };
     if (sameCell(goal, this.selectedCell)) return;
     const from = { ...this.selectedCell };
-    const steps = Math.min(64, Math.max(Math.abs(goal.lane - from.lane), Math.abs(goal.row - from.row)));
+    const steps = Math.min(
+      64,
+      Math.max(Math.abs(goal.lane - from.lane), Math.abs(goal.row - from.row)),
+    );
     this.navigatingDrag = true;
     try {
       // Select physical cells along the travelled segment in one update per cell.
       // Column memory is updated by onSelect, but never pulls a held plane away.
       for (let i = 1; i <= steps; i++) {
         const cell = {
-          lane: Math.round(from.lane + (goal.lane - from.lane) * i / steps),
-          row: Math.round(from.row + (goal.row - from.row) * i / steps),
+          lane: Math.round(from.lane + ((goal.lane - from.lane) * i) / steps),
+          row: Math.round(from.row + ((goal.row - from.row) * i) / steps),
         };
-        if (!sameCell(cell, this.selectedCell)) this.onSelect?.(fileAtCell(cell, this.coordinateOrigin.row), cell);
+        if (!sameCell(cell, this.selectedCell))
+          this.onSelect?.(fileAtCell(cell, this.coordinateOrigin.row), cell);
       }
     } finally {
       this.navigatingDrag = false;
@@ -3681,26 +5128,52 @@ export class ArchiveScene {
       startY = 0,
       moved = false;
     let browse = false,
+      touchCardScroll = false,
+      previousY = 0,
       cancelled = false;
     let startTrack = { lane: 0, row: 0 };
     let wheelTotal = 0,
       wheelTime = 0;
     const pointers = new Set<number>();
-    const hover = (e: Pick<PointerEvent, 'clientX' | 'clientY' | 'pointerType'>) => {
-      if (
-        e.pointerType !== "mouse" ||
-        !this.canBrowse() ||
-        this.archiveMomentum
-      )
+    const hover = (
+      e: Pick<PointerEvent, "clientX" | "clientY" | "pointerType">,
+    ) => {
+      if (e.pointerType !== "mouse" || this.archiveMomentum) return;
+      if (this.canBrowse()) {
+        this.setDetailHover(null);
+        const r = this.canvasRect();
+        this.pointer.set(
+          (e.clientX - r.left) / r.width - 0.5,
+          (e.clientY - r.top) / r.height - 0.5,
+        );
+        const cell = this.pickCell(e.clientX, e.clientY);
+        this.setHover(cell);
+        canvas.style.cursor = cell ? "pointer" : "grab";
         return;
-      const r = this.canvasRect();
-      this.pointer.set(
-        (e.clientX - r.left) / r.width - 0.5,
-        (e.clientY - r.top) / r.height - 0.5,
-      );
-      const cell = this.pickCell(e.clientX, e.clientY);
-      this.setHover(cell);
-      canvas.style.cursor = cell ? "pointer" : "grab";
+      }
+      if (this.targetDetail > 0 && this.canInspect) {
+        this.setHover(null);
+        if (
+          this.dragging ||
+          Math.abs(this.rotation - this.targetRotation) > 0.004
+        ) {
+          this.setDetailHover(null);
+          canvas.style.cursor = this.dragging
+            ? "grabbing"
+            : this.canInspect
+              ? "grab"
+              : "default";
+          return;
+        }
+        const hit = this.pickDetailHotspot(e.clientX, e.clientY);
+        this.setDetailHover(hit);
+        canvas.style.cursor =
+          hit && hit !== "card-body"
+            ? "pointer"
+            : this.canInspect
+              ? "grab"
+              : "default";
+      }
     };
     this.flushHover = () => {
       const sample = this.pendingHover;
@@ -3715,8 +5188,11 @@ export class ArchiveScene {
       this.dragTrack = null;
       this.holdingArchive = false;
       browse = false;
+      touchCardScroll = false;
       this.setHover(null);
-      canvas.style.cursor = this.canBrowse() ? "grab" : "default";
+      this.setDetailHover(null);
+      canvas.style.cursor =
+        this.canBrowse() || this.canInspect ? "grab" : "default";
       if (id !== null && canvas.hasPointerCapture(id))
         canvas.releasePointerCapture(id);
     };
@@ -3754,123 +5230,206 @@ export class ArchiveScene {
         row: this.trackCoordinate("row", this.rail.value),
       });
     };
-    canvas.addEventListener("pointerdown", (e) => {
-      if (e.pointerType === "mouse" && e.button !== 0) return;
-      if (!this.canBrowse() && !this.canInspect) return;
-      this.pendingHover = null;
-      pointers.add(e.pointerId);
-      if (pointers.size > 1) {
-        cancelled = true;
-        reset();
-        return;
-      }
-      activePointer = e.pointerId;
-      cancelled = false;
-      moved = this.archiveMomentum !== null;
-      startX = previousX = e.clientX;
-      startY = e.clientY;
-      browse = this.canBrowse();
-      this.stopMomentum();
-      if (browse) {
-        this.columnCamera.velocity = 0;
-        this.rail.velocity = 0;
-      }
-      this.holdingArchive = browse;
-      this.dragging = !browse && this.canInspect;
-      startTrack = { lane: this.columnCamera.value, row: this.rail.value };
-      this.archiveDrag.start(e.clientX, e.clientY, this.dragProjection(), e.timeStamp);
-      try {
-        canvas.setPointerCapture(e.pointerId);
-      } catch {
-        /* ignore synthetic pointers without an active OS pointer id */
-      }
-    }, { signal: this.inputEvents.signal });
-    canvas.addEventListener("pointermove", (e) => {
-      if (activePointer !== null && e.pointerId !== activePointer) return;
-      if (activePointer === null) {
-        // Coalesce uncaptured hover only; dragging and release velocity stay immediate.
-        this.pendingHover = { clientX: e.clientX, clientY: e.clientY, pointerType: e.pointerType };
-        return;
-      }
-      if (cancelled) return;
-      moved ||= Math.hypot(e.clientX - startX, e.clientY - startY) > 7;
-      if (browse) {
-        if (!this.canBrowse()) {
-          this.cancelPointer();
+    canvas.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (e.pointerType === "mouse" && e.button !== 0) return;
+        if (!this.canBrowse() && !this.canInspect) return;
+        this.pendingHover = null;
+        pointers.add(e.pointerId);
+        if (pointers.size > 1) {
+          cancelled = true;
+          reset();
           return;
         }
-        moveArchive(e);
-        return;
-      }
-      if (this.dragging && this.canInspect) {
-        this.targetRotation = THREE.MathUtils.clamp(
-          this.targetRotation + (e.clientX - previousX) * 0.004,
-          -0.8,
-          0.8,
+        activePointer = e.pointerId;
+        cancelled = false;
+        moved = this.archiveMomentum !== null;
+        startX = previousX = e.clientX;
+        startY = previousY = e.clientY;
+        browse = this.canBrowse();
+        this.stopMomentum();
+        if (browse) {
+          this.columnCamera.velocity = 0;
+          this.rail.velocity = 0;
+        }
+        this.holdingArchive = browse;
+        const hit = !browse && e.pointerType === "touch" && this.detailDrawerOpen
+          ? this.pickDetailHotspot(e.clientX, e.clientY)
+          : null;
+        touchCardScroll = hit?.startsWith("card-") ?? false;
+        this.dragging = !browse && this.canInspect && !touchCardScroll;
+        startTrack = { lane: this.columnCamera.value, row: this.rail.value };
+        this.archiveDrag.start(
+          e.clientX,
+          e.clientY,
+          this.dragProjection(),
+          e.timeStamp,
         );
-        previousX = e.clientX;
-      }
-    }, { signal: this.inputEvents.signal });
-    canvas.addEventListener("pointerup", (e) => {
-      pointers.delete(e.pointerId);
-      if (e.pointerId !== activePointer) return;
-      if (!cancelled && browse && this.canBrowse()) {
-        moveArchive(e);
-        if (this.archiveDrag.active) {
-          if (this.motion.dragMomentum) {
-            this.archiveMomentum = {
-              time: performance.now() / 1000,
-              motion: new ArchivePlaneMomentum(
-                { lane: this.trackCoordinate("lane", this.columnCamera.value), row: this.trackCoordinate("row", this.rail.value) },
-                this.archiveDrag.releaseVelocity(e.timeStamp, false),
-              ),
-            };
+        try {
+          canvas.setPointerCapture(e.pointerId);
+        } catch {
+          /* ignore synthetic pointers without an active OS pointer id */
+        }
+      },
+      { signal: this.inputEvents.signal },
+    );
+    canvas.addEventListener(
+      "pointermove",
+      (e) => {
+        if (activePointer !== null && e.pointerId !== activePointer) return;
+        if (activePointer === null) {
+          // Coalesce uncaptured hover only; dragging and release velocity stay immediate.
+          this.pendingHover = {
+            clientX: e.clientX,
+            clientY: e.clientY,
+            pointerType: e.pointerType,
+          };
+          return;
+        }
+        if (cancelled) return;
+        moved ||= Math.hypot(e.clientX - startX, e.clientY - startY) > 7;
+        if (browse) {
+          if (!this.canBrowse()) {
+            this.cancelPointer();
+            return;
           }
-        } else if (!moved) {
-          const cell = this.pickCell(e.clientX, e.clientY);
-          if (cell) {
-            // Two presses on the same card open it. The first press already
-            // selected and started lifting it, so the lift is released here and
-            // the extraction takes over from the current height: no second rise.
-            const now = e.timeStamp || performance.now();
-            const file = fileAtCell(cell, this.coordinateOrigin.row);
-            const repeat =
-              this.lastPress.file === file &&
-              now - this.lastPress.time < DOUBLE_PRESS_MS;
-            this.lastPress = { file, time: now };
-            if (repeat) {
-              this.lastPress.file = -1;
-              this.onOpen?.(file);
-            } else {
-              this.onSelect?.(file, cell);
+          moveArchive(e);
+          return;
+        }
+        if (touchCardScroll) {
+          if (moved) {
+            this.scrollDetailCard((previousY - e.clientY) * 3);
+            previousY = e.clientY;
+          }
+          return;
+        }
+        if (this.dragging && this.canInspect) {
+          this.targetRotation = THREE.MathUtils.clamp(
+            this.targetRotation + (e.clientX - previousX) * 0.004,
+            -0.8,
+            0.8,
+          );
+          previousX = e.clientX;
+        }
+      },
+      { signal: this.inputEvents.signal },
+    );
+    canvas.addEventListener(
+      "pointerup",
+      (e) => {
+        pointers.delete(e.pointerId);
+        if (e.pointerId !== activePointer) return;
+        if (!cancelled && browse && this.canBrowse()) {
+          moveArchive(e);
+          if (this.archiveDrag.active) {
+            if (this.motion.dragMomentum) {
+              this.archiveMomentum = {
+                time: performance.now() / 1000,
+                motion: new ArchivePlaneMomentum(
+                  {
+                    lane: this.trackCoordinate("lane", this.columnCamera.value),
+                    row: this.trackCoordinate("row", this.rail.value),
+                  },
+                  this.archiveDrag.releaseVelocity(e.timeStamp, false),
+                ),
+              };
+            }
+          } else if (!moved) {
+            const cell = this.pickCell(e.clientX, e.clientY);
+            if (cell) {
+              // Two presses on the same card open it. The first press already
+              // selected and started lifting it, so the lift is released here and
+              // the extraction takes over from the current height: no second rise.
+              const now = e.timeStamp || performance.now();
+              const file = fileAtCell(cell, this.coordinateOrigin.row);
+              const repeat =
+                this.lastPress.file === file &&
+                now - this.lastPress.time < DOUBLE_PRESS_MS;
+              this.lastPress = { file, time: now };
+              if (repeat) {
+                this.lastPress.file = -1;
+                this.onOpen?.(file);
+              } else {
+                this.onSelect?.(file, cell);
+              }
             }
           }
+        } else if (
+          !cancelled &&
+          !browse &&
+          !moved &&
+          this.targetDetail > 0 &&
+          this.canInspect
+        ) {
+          const hit = this.pickDetailHotspot(e.clientX, e.clientY);
+          this.handleDetailHotspotClick(hit);
         }
-      }
-      reset();
-    }, { signal: this.inputEvents.signal });
-    canvas.addEventListener("pointercancel", (e) => {
-      pointers.delete(e.pointerId);
-      if (e.pointerId === activePointer) {
-        cancelled = true;
         reset();
-      }
-    }, { signal: this.inputEvents.signal });
-    canvas.addEventListener("lostpointercapture", (e) => {
-      pointers.delete(e.pointerId);
-      if (e.pointerId === activePointer) {
-        cancelled = true;
-        reset();
-      }
-    }, { signal: this.inputEvents.signal });
-    canvas.addEventListener("pointerleave", () => {
-      this.pendingHover = null;
-      this.pointer.set(0, 0);
-      this.setHover(null);
-    }, { signal: this.inputEvents.signal });
+      },
+      { signal: this.inputEvents.signal },
+    );
+    canvas.addEventListener(
+      "pointercancel",
+      (e) => {
+        pointers.delete(e.pointerId);
+        if (e.pointerId === activePointer) {
+          cancelled = true;
+          reset();
+        }
+      },
+      { signal: this.inputEvents.signal },
+    );
+    canvas.addEventListener(
+      "lostpointercapture",
+      (e) => {
+        pointers.delete(e.pointerId);
+        if (e.pointerId === activePointer) {
+          cancelled = true;
+          reset();
+        }
+      },
+      { signal: this.inputEvents.signal },
+    );
+    canvas.addEventListener(
+      "pointerleave",
+      () => {
+        this.pendingHover = null;
+        this.pointer.set(0, 0);
+        this.setHover(null);
+        this.setDetailHover(null);
+      },
+      { signal: this.inputEvents.signal },
+    );
     canvas.addEventListener(
       "wheel",
       (e) => {
+        if (
+          !this.canBrowse() &&
+          this.isDetailBadgeActive() &&
+          this.detailDrawerOpen &&
+          this.detailPulloutLayout &&
+          this.detailPulloutLayout.maxScroll > 0 &&
+          activePointer === null &&
+          !e.ctrlKey
+        ) {
+          const hit = this.pickDetailHotspot(e.clientX, e.clientY);
+          if (hit && hit.startsWith("card-")) {
+            e.preventDefault();
+            const delta = THREE.MathUtils.clamp(
+              e.deltaY *
+                (e.deltaMode === 1
+                  ? 40
+                  : e.deltaMode === 2
+                    ? canvas.clientHeight
+                    : 1),
+              -240,
+              240,
+            );
+            this.scrollDetailCard(delta * 1.4);
+            return;
+          }
+        }
         if (
           !this.canBrowse() ||
           activePointer !== null ||
@@ -3909,21 +5468,39 @@ export class ArchiveScene {
       },
       { ...{ passive: false }, signal: this.inputEvents.signal },
     );
-    window.addEventListener("blur", () => this.cancelPointer(), { signal: this.inputEvents.signal });
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) this.cancelPointer();
-    }, { signal: this.inputEvents.signal });
-    window.addEventListener("resize", () => {
-      this.cachedCanvasRect = null;
-      this.cancelPointer();
-    }, { signal: this.inputEvents.signal });
-    window.addEventListener("scroll", () => {
-      this.cachedCanvasRect = null;
-    }, { passive: true, signal: this.inputEvents.signal });
+    window.addEventListener("blur", () => this.cancelPointer(), {
+      signal: this.inputEvents.signal,
+    });
+    document.addEventListener(
+      "visibilitychange",
+      () => {
+        if (document.hidden) this.cancelPointer();
+      },
+      { signal: this.inputEvents.signal },
+    );
+    window.addEventListener(
+      "resize",
+      () => {
+        this.cachedCanvasRect = null;
+        this.cancelPointer();
+      },
+      { signal: this.inputEvents.signal },
+    );
+    window.addEventListener(
+      "scroll",
+      () => {
+        this.cachedCanvasRect = null;
+      },
+      { passive: true, signal: this.inputEvents.signal },
+    );
     // After multi-touch cancels capture, a finger can finish outside the canvas.
-    window.addEventListener("pointerup", (e) => pointers.delete(e.pointerId), { signal: this.inputEvents.signal });
-    window.addEventListener("pointercancel", (e) =>
-      pointers.delete(e.pointerId), { signal: this.inputEvents.signal }
+    window.addEventListener("pointerup", (e) => pointers.delete(e.pointerId), {
+      signal: this.inputEvents.signal,
+    });
+    window.addEventListener(
+      "pointercancel",
+      (e) => pointers.delete(e.pointerId),
+      { signal: this.inputEvents.signal },
     );
   }
   update(time: number) {
@@ -3940,7 +5517,8 @@ export class ArchiveScene {
     this.slotUnderlights.update(dt, !this.motion.selectionTransition);
     if (this.introRelease) {
       this.introRelease.age += dt;
-      if (this.introRelease.age >= INTRO_RELEASE_DURATION) this.introRelease = null;
+      if (this.introRelease.age >= INTRO_RELEASE_DURATION)
+        this.introRelease = null;
     }
     if (this.intro) {
       if (this.intro.started) {
@@ -3977,8 +5555,10 @@ export class ArchiveScene {
       }
     }
     this.syncOverviewSlotLights();
-    const blend = 1 - Math.exp(-dt * (this.motion.selectionTransition ? 2.8 : 35));
-    const detailBlend = 1 - Math.exp(-dt * (this.motion.detailTransition ? 2.8 : 35));
+    const blend =
+      1 - Math.exp(-dt * (this.motion.selectionTransition ? 2.8 : 35));
+    const detailBlend =
+      1 - Math.exp(-dt * (this.motion.detailTransition ? 2.8 : 35));
     this.reveal = THREE.MathUtils.lerp(this.reveal, this.targetReveal, blend);
     if (Math.abs(this.reveal - this.targetReveal) < 1e-4) {
       this.reveal = this.targetReveal;
@@ -4005,18 +5585,37 @@ export class ArchiveScene {
       this.lastInteraction = time;
     }
     const hoverKey = this.hoverCell ? cellKey(this.hoverCell) : null;
-    const hoverTarget = this.hoverCell && sameCell(this.hoverCell, this.selectedCell)
-      ? 0.28
-      : HOVER_PREVIEW_LIFT;
-    if (hoverKey && !this.hoverLifts.has(hoverKey)) this.hoverLifts.set(hoverKey, 0);
+    const hoverTarget =
+      this.hoverCell && sameCell(this.hoverCell, this.selectedCell)
+        ? 0.28
+        : HOVER_PREVIEW_LIFT;
+    if (hoverKey && !this.hoverLifts.has(hoverKey))
+      this.hoverLifts.set(hoverKey, 0);
     for (const [key, value] of this.hoverLifts) {
       const target = key === hoverKey ? hoverTarget : 0;
-      const next = !this.motion.selectionTransition ? target : THREE.MathUtils.lerp(value, target, 1 - Math.exp(-dt * 14));
+      const next = !this.motion.selectionTransition
+        ? target
+        : THREE.MathUtils.lerp(value, target, 1 - Math.exp(-dt * 14));
       if (target === 0 && next < 0.0001) this.hoverLifts.delete(key);
-      else if (target > 0 && Math.abs(next - target) < 0.0005) this.hoverLifts.set(key, target);
+      else if (target > 0 && Math.abs(next - target) < 0.0005)
+        this.hoverLifts.set(key, target);
       else this.hoverLifts.set(key, next);
     }
-    const hoverLift = (cell: ArchiveCell) => this.hoverLifts.get(cellKey(cell)) ?? 0;
+    const hoverLift = (cell: ArchiveCell) =>
+      this.hoverLifts.get(cellKey(cell)) ?? 0;
+    if (this.canBrowse() && !this.intro && this.loaded) {
+      if (this.hoverCell && !sameCell(this.hoverCell, this.selectedCell)) {
+        this.hoverStickerCell = { ...this.hoverCell };
+      } else if (
+        this.hoverStickerCell &&
+        (sameCell(this.hoverStickerCell, this.selectedCell) ||
+          hoverLift(this.hoverStickerCell) <= 0.03)
+      ) {
+        this.hoverStickerCell = null;
+      }
+    } else {
+      this.hoverStickerCell = null;
+    }
     const chosen = this.cellPosition(this.selectedCell);
     const selectedRow = this.selectedCell.row;
     const selectedLane = this.selectedCell.lane;
@@ -4043,9 +5642,13 @@ export class ArchiveScene {
       }
     }
     if (momentum) {
-      this.columnCamera.value = this.trackPosition("lane", momentum.motion.lane.value);
+      this.columnCamera.value = this.trackPosition(
+        "lane",
+        momentum.motion.lane.value,
+      );
       this.rail.value = this.trackPosition("row", momentum.motion.row.value);
-      this.columnCamera.velocity = momentum.motion.lane.velocity * COLUMN_SPACING;
+      this.columnCamera.velocity =
+        momentum.motion.lane.velocity * COLUMN_SPACING;
       this.rail.velocity = -momentum.motion.row.velocity * ROW_SPACING;
       if (momentum.motion.phase === "idle") this.archiveMomentum = null;
     }
@@ -4106,12 +5709,12 @@ export class ArchiveScene {
       ? ease(this.introRelease.age / INTRO_RELEASE_DURATION)
       : 0;
     const calculateField = (row: number, lane: number) => {
-      const breathing = idleWave(
+      const breathing =
+        idleWave(
           row + this.coordinateOrigin.row,
           lane + this.coordinateOrigin.lane,
           time,
-        ) *
-          this.idleGain;
+        ) * this.idleGain;
       let pulseHeight = 0;
       if (this.motion.selectionWave) {
         const useColumnSwitchWave =
@@ -4171,10 +5774,8 @@ export class ArchiveScene {
         26.56,
       );
       // Lift the static rear trough back to the slot plane with a soft edge.
-      const planeTransition =
-        THREE.MathUtils.smoothstep(settling, 0, 0.16);
-      const overviewSettling =
-        Math.max(0, settling) * planeTransition;
+      const planeTransition = THREE.MathUtils.smoothstep(settling, 0, 0.16);
+      const overviewSettling = Math.max(0, settling) * planeTransition;
       if (introFieldState) {
         const rightOffset =
           (lane - introOrigin.lane) * COLUMN_SPACING * OVERVIEW_RIGHT_X +
@@ -4201,7 +5802,10 @@ export class ArchiveScene {
     };
     const field = (row: number, lane: number): number => {
       let values = fieldCache.get(lane);
-      if (!values) { values = new Map(); fieldCache.set(lane, values); }
+      if (!values) {
+        values = new Map();
+        fieldCache.set(lane, values);
+      }
       const previous = values.get(row);
       if (previous !== undefined) return previous;
       const value = calculateField(row, lane);
@@ -4209,8 +5813,7 @@ export class ArchiveScene {
       return value;
     };
     const selectedBase = chosen.y + field(selectedRow, selectedLane);
-    const introLiftScale =
-      !this.intro || this.intro.fullLiftUnlocked ? 1 : 0;
+    const introLiftScale = !this.intro || this.intro.fullLiftUnlocked ? 1 : 0;
     if (this.returnY !== null && this.rotation !== 0) {
       this.lift.value = this.returnY - selectedBase;
       this.lift.velocity = 0;
@@ -4226,9 +5829,7 @@ export class ArchiveScene {
                 Math.abs(o.cell.row - selectedRow) < 5,
             )
           ? 0
-          : OVERVIEW_LIFT *
-            this.targetReveal *
-            introLiftScale;
+          : OVERVIEW_LIFT * this.targetReveal * introLiftScale;
       if (!this.motion.detailTransition) {
         this.lift = { value: liftTarget, velocity: 0 };
       } else {
@@ -4252,9 +5853,61 @@ export class ArchiveScene {
     if (Math.abs(this.detail - cameraTarget) < 0.001) {
       this.detail = cameraTarget;
     }
+    const drawerTarget = this.targetDetail && this.detailDrawerOpen ? 1 : 0;
+    if (!this.motion.detailTransition) {
+      this.detailDrawer = { value: drawerTarget, velocity: 0 };
+    } else {
+      damp(this.detailDrawer, drawerTarget, 6.5, dt);
+      snapSpring(this.detailDrawer, drawerTarget);
+    }
+    const stickerHovering =
+      this.isDetailBadgeActive() &&
+      (this.detailHoveredHotspot === "note" ||
+        this.detailHoveredHotspot === "copy-prompt");
+    // 只有右下角在静置态保留轻卷；指针停在贴纸上时，离指针最近的角掀起。
+    const restPeel = this.detail > 0.5 ? 0.24 : 0.1;
+    const hoveredCorner =
+      stickerHovering && this.detailStickerHoverCorner >= 0
+        ? this.detailStickerHoverCorner
+        : -1;
+    // 换角时先让上一个角基本落回静置，再抬新角，保证同一时刻只掀一个角。
+    // 门限用真实抬升幅度（满幅 0.092）：旧角残余抬升降到约 13% 以内才放行新角。
+    let otherLift = 0;
+    for (let corner = 0; corner < this.detailStickerCornerPeel.length; corner++) {
+      if (corner === hoveredCorner) continue;
+      const rest = corner === STICKER_REST_CORNER ? restPeel : 0;
+      otherLift = Math.max(
+        otherLift,
+        stickerPeelLift(this.detailStickerCornerPeel[corner].value) -
+          stickerPeelLift(rest),
+      );
+    }
+    const handover = 1 - THREE.MathUtils.smoothstep(otherLift, 0.004, 0.012);
+    for (let corner = 0; corner < this.detailStickerCornerPeel.length; corner++) {
+      const spring = this.detailStickerCornerPeel[corner];
+      // 悬停角用「静置基线 + 增量」：右下角在放行前保持 0.24，不会被压平。
+      const base = corner === STICKER_REST_CORNER ? restPeel : 0;
+      const target =
+        corner === hoveredCorner
+          ? base + (STICKER_HOVER_PEEL - base) * handover
+          : base;
+      if (!this.motion.detailTransition) {
+        spring.value = target;
+        spring.velocity = 0;
+      } else {
+        damp(spring, target, 10, dt);
+        snapSpring(spring, target);
+      }
+      this.detailStickerPeelScratch[corner] = spring.value;
+    }
+    if (this.detailDrawer.value > 0.002 && !this.detailPulloutLayout) {
+      this.redrawPulloutCard();
+    }
     const detail = this.detail;
     const selectedVisualLift = this.overviewVisualLift();
-    const selectedDirectLight = this.slotUnderlights.directFor(this.selectedCell);
+    const selectedDirectLight = this.slotUnderlights.directFor(
+      this.selectedCell,
+    );
     this.appearance.apply(
       this.model,
       this.appearanceInSlot(this.lift.value, selectedDirectLight),
@@ -4275,14 +5928,20 @@ export class ArchiveScene {
       const o = this.outgoing[i];
       const p = this.cellPosition(o.cell);
       const baseY = p.y + field(o.cell.row, o.cell.lane);
-      o.group.rotation.y = returnStep(o.group.rotation.y, dt, !this.motion.detailTransition);
+      o.group.rotation.y = returnStep(
+        o.group.rotation.y,
+        dt,
+        !this.motion.detailTransition,
+      );
       if (o.returnY !== null) {
         o.lift.value = o.returnY - baseY;
         o.lift.velocity = 0;
         if (o.group.rotation.y === 0) o.returnY = null;
       } else {
         const rate = this.motion.detailTransition
-          ? (i < fastReturnCount ? OUTGOING_CATCH_UP_RATE : 4.5)
+          ? i < fastReturnCount
+            ? OUTGOING_CATCH_UP_RATE
+            : 4.5
           : 35;
         damp(o.lift, 0, rate, dt);
       }
@@ -4322,11 +5981,7 @@ export class ArchiveScene {
         this.releaseOutgoingGroup(o.group);
       }
     }
-    if (
-      this.pendingPulse &&
-      !this.targetDetail &&
-      this.targetReveal
-    ) {
+    if (this.pendingPulse && !this.targetDetail && this.targetReveal) {
       const selectedY = selectedBase + this.lift.value;
       const oldCardsLower = this.outgoing.every(
         (old) =>
@@ -4336,7 +5991,11 @@ export class ArchiveScene {
       );
       // The new file causes the wave: finish most of its rise and let nearby
       // outgoing files get below it before starting the outward pulse.
-      if (this.lift.value >= OVERVIEW_LIFT * 0.87 && this.returnY === null && oldCardsLower) {
+      if (
+        this.lift.value >= OVERVIEW_LIFT * 0.87 &&
+        this.returnY === null &&
+        oldCardsLower
+      ) {
         if (this.motion.selectionWave) this.emitPulse(this.pendingPulse);
         this.pendingPulse = null;
       }
@@ -4359,24 +6018,329 @@ export class ArchiveScene {
       this.rotation,
       0,
     );
-    const fixedDetailBasis: FixedDetailCameraBasis | undefined =
-      this.fixedDetailCameraHeld
-        ? {
-            index: this.selectedIndex,
-            x: this.model.position.x,
-            // Measure from the rendered pose with only this frame's extraction
-            // and transient lifts removed. The slot field, shoulder wave, rail
-            // and reveal offset are already represented in this baseline.
-            y:
-              this.model.position.y -
-              this.lift.value -
-              selectedVisualLift -
-              hoverLift(this.selectedCell),
-            z: this.model.position.z,
-            aspect:
-              this.container.clientWidth / this.container.clientHeight,
+    if (this.detailPulloutGroup) {
+      const t = THREE.MathUtils.clamp(this.detailDrawer.value, 0, 1);
+      if (t < 0.002) {
+        this.detailPulloutGroup.visible = false;
+      } else {
+        this.model.updateMatrixWorld();
+        this.detailClipPlane
+          .set(new THREE.Vector3(1, 0, 0), -2.495)
+          .applyMatrix4(this.model.matrixWorld);
+        this.detailPulloutGroup.visible = true;
+        this.detailPulloutGroup.position
+          .set(
+            THREE.MathUtils.lerp(0.45, 4.68, t),
+            1.85,
+            THREE.MathUtils.lerp(
+              0.0,
+              0.012,
+              THREE.MathUtils.smoothstep(t, 0.55, 1),
+            ),
+          )
+          .applyMatrix4(this.model.matrixWorld);
+        this.detailPulloutGroup.quaternion.copy(this.model.quaternion);
+        this.detailPulloutGroup.rotateY(
+          -0.045 * THREE.MathUtils.smoothstep(t, 0.4, 1),
+        );
+      }
+    }
+    if (this.detailStickerGroup) {
+      const showSticker =
+        this.loaded &&
+        this.reveal > 0.5 &&
+        (this.targetDetail > 0 || this.lift.value > 0.12);
+      if (!showSticker) {
+        this.detailStickerGroup.visible = false;
+      } else {
+        this.model.updateMatrixWorld();
+        this.detailStickerGroup.visible = true;
+        this.detailStickerGroup.position
+          .set(STICKER_LOCAL_X, STICKER_LOCAL_Y, this.glassFrontZ + STICKER_PLATE_LIFT)
+          .applyMatrix4(this.model.matrixWorld);
+        this.detailStickerGroup.quaternion.copy(this.model.quaternion);
+        this.detailStickerGroup.rotateZ(STICKER_TILT_Z);
+        this.applyStickerPeel(this.detailStickerPeelScratch);
+        this.detailStickerShadowPeel.value.set(
+          this.detailStickerPeelScratch[0],
+          this.detailStickerPeelScratch[1],
+          this.detailStickerPeelScratch[2],
+          this.detailStickerPeelScratch[3],
+        );
+        const slotLight = THREE.MathUtils.clamp(
+          selectedDirectLight * this.overviewSlotLightGain.value,
+          0,
+          1,
+        );
+        const stickerLight = THREE.MathUtils.clamp(
+          Math.max(detail, slotLight),
+          0,
+          1,
+        );
+        const liftAlpha =
+          this.targetDetail > 0 || detail > 0.05
+            ? 1
+            : THREE.MathUtils.smoothstep(
+                this.lift.value,
+                0.12,
+                OVERVIEW_LIFT * 0.72,
+              );
+        if (this.detailStickerFrontMat) {
+          this.detailStickerFrontMat.color
+            .copy(HOVER_STICKER_SHADED_COLOR)
+            .lerp(HOVER_STICKER_LIT_COLOR, stickerLight);
+          this.detailStickerFrontMat.emissive
+            .copy(HOVER_STICKER_SHADED_EMISSIVE)
+            .lerp(HOVER_STICKER_LIT_EMISSIVE, stickerLight);
+          this.detailStickerFrontMat.emissiveIntensity = THREE.MathUtils.lerp(
+            0.1,
+            0.46,
+            stickerLight,
+          );
+          this.detailStickerFrontMat.opacity = liftAlpha;
+        }
+        if (this.detailStickerBackMat) {
+          this.detailStickerBackMat.emissiveIntensity = THREE.MathUtils.lerp(
+            0.1,
+            0.48,
+            stickerLight,
+          );
+          this.detailStickerBackMat.opacity = liftAlpha;
+        }
+        if (this.detailStickerShadowMat) {
+          let peelMax = 0;
+          for (let corner = 0; corner < this.detailStickerPeelScratch.length; corner++) {
+            peelMax = Math.max(peelMax, this.detailStickerPeelScratch[corner]);
           }
-        : undefined;
+          const shadowOpacity = THREE.MathUtils.lerp(
+            0.82,
+            1.0,
+            THREE.MathUtils.clamp((peelMax - 0.1) / 0.68, 0, 1),
+          );
+          this.detailStickerShadowMat.opacity =
+            shadowOpacity *
+            liftAlpha *
+            THREE.MathUtils.lerp(0.55, 1, stickerLight);
+        }
+      }
+    }
+    if (
+      this.detailToggleGroup &&
+      this.detailToggleInMesh &&
+      this.detailToggleOutMesh &&
+      this.detailToggleInUniforms &&
+      this.detailToggleOutUniforms
+    ) {
+      if (this.loaded && this.targetDetail > 0 && detail >= 0.45) {
+        if (
+          this.detailToggleMode === "hidden" ||
+          this.detailToggleMode === "hide"
+        ) {
+          this.detailToggleLabelOpen = this.detailDrawerOpen;
+          this.detailToggleSwitchActive = false;
+          this.detailToggleOutMesh.visible = false;
+          this.redrawDetailToggleCanvas(
+            this.detailToggleInCanvas,
+            this.detailToggleInTexture,
+            this.detailToggleLabelOpen,
+            this.detailHoveredHotspot === "toggle-detail",
+          );
+          if (!this.motion.surfaceTransitions) {
+            this.detailToggleMode = "visible";
+            this.detailToggleVisibility = 1;
+          } else {
+            this.detailToggleMode = "reveal";
+            this.detailToggleDuration = MIST_RETURN_DURATION_MS / 1000;
+            this.detailToggleElapsed =
+              this.detailToggleVisibility * this.detailToggleDuration;
+          }
+        }
+      }
+
+      if (this.detailToggleMode === "reveal") {
+        this.detailToggleElapsed += dt;
+        const raw = clamp01(
+          this.detailToggleElapsed / this.detailToggleDuration,
+        );
+        this.detailToggleVisibility = easeMistReveal(raw);
+        if (raw >= 1) {
+          this.detailToggleMode = "visible";
+          this.detailToggleVisibility = 1;
+        }
+      } else if (this.detailToggleMode === "hide") {
+        this.detailToggleElapsed += dt;
+        const raw = clamp01(
+          this.detailToggleElapsed / this.detailToggleDuration,
+        );
+        this.detailToggleVisibility = 1 - easeOutQuad(raw);
+        if (raw >= 1) {
+          this.detailToggleMode = "hidden";
+          this.detailToggleVisibility = 0;
+          if (this.detailToggleLabelOpen) {
+            this.detailToggleLabelOpen = false;
+            this.redrawDetailToggleCanvas(
+              this.detailToggleInCanvas,
+              this.detailToggleInTexture,
+              false,
+              false,
+            );
+          }
+        }
+      }
+
+      const showToggle =
+        this.loaded && this.reveal > 0.5 && this.detailToggleMode !== "hidden";
+      if (!showToggle) {
+        this.detailToggleGroup.visible = false;
+        this.detailToggleInMesh.visible = false;
+        this.detailToggleOutMesh.visible = false;
+      } else {
+        this.model.updateMatrixWorld();
+        this.detailToggleGroup.visible = true;
+        this.detailToggleGroup.position
+          .set(TOGGLE_LOCAL_X, TOGGLE_LOCAL_Y, this.glassFrontZ + 0.0025)
+          .applyMatrix4(this.model.matrixWorld);
+        this.detailToggleGroup.quaternion.copy(this.model.quaternion);
+
+        const worldPerBadgePx = 3.426 / 1485;
+        const applyStateMotion = (
+          mesh: THREE.Mesh,
+          uniforms: MistDissolveShaderUniforms,
+          localT: number,
+          hiding: boolean,
+          isSwitch: boolean,
+        ) => {
+          const motionT = hiding ? easeOutQuad(localT) : easeOutCubic(localT);
+          const dyMag = isSwitch ? 6.5 : hiding ? 11 : 12;
+          const scaleDelta = isSwitch ? 0.028 : 0.045;
+          const dyPx = hiding ? -motionT * dyMag : (1 - motionT) * dyMag;
+          const scale = hiding
+            ? 1 - scaleDelta * motionT
+            : 1 - scaleDelta + scaleDelta * motionT;
+          mesh.visible = true;
+          mesh.position.set(
+            0,
+            -dyPx * worldPerBadgePx,
+            mesh === this.detailToggleOutMesh ? -0.0003 : 0,
+          );
+          mesh.scale.set(scale, scale, 1);
+          uniforms.uActive.value = 1;
+          uniforms.uHiding.value = hiding ? 1 : 0;
+          uniforms.uModeSwitch.value = isSwitch ? 1 : 0;
+          uniforms.uProgress.value = localT;
+        };
+
+        if (
+          this.detailToggleSwitchActive &&
+          (this.detailToggleMode === "visible" ||
+            this.detailToggleMode === "reveal")
+        ) {
+          this.detailToggleSwitchElapsed += dt;
+          const outDur = (MIST_SWITCH_DURATION_MS * 0.62) / 1000;
+          const inDelay = (MIST_SWITCH_DURATION_MS * 0.14) / 1000;
+          const inDur =
+            (MIST_SWITCH_DURATION_MS - MIST_SWITCH_DURATION_MS * 0.14) / 1000;
+
+          if (this.detailToggleSwitchElapsed < outDur) {
+            const outT = easeOutQuad(
+              clamp01(this.detailToggleSwitchElapsed / outDur),
+            );
+            applyStateMotion(
+              this.detailToggleOutMesh,
+              this.detailToggleOutUniforms,
+              outT,
+              true,
+              true,
+            );
+          } else {
+            this.detailToggleOutMesh.visible = false;
+            this.detailToggleOutUniforms.uActive.value = 0;
+          }
+
+          if (this.detailToggleSwitchElapsed <= inDelay) {
+            this.detailToggleInMesh.visible = false;
+            this.detailToggleInUniforms.uActive.value = 1;
+            this.detailToggleInUniforms.uProgress.value = 0;
+          } else {
+            const inT = easeMistReveal(
+              clamp01((this.detailToggleSwitchElapsed - inDelay) / inDur),
+            );
+            applyStateMotion(
+              this.detailToggleInMesh,
+              this.detailToggleInUniforms,
+              inT,
+              false,
+              true,
+            );
+          }
+
+          if (
+            this.detailToggleSwitchElapsed >= inDelay + inDur &&
+            this.detailToggleSwitchElapsed >= outDur
+          ) {
+            this.detailToggleSwitchActive = false;
+            this.detailToggleOutMesh.visible = false;
+            this.detailToggleOutUniforms.uActive.value = 0;
+            this.detailToggleInUniforms.uActive.value = 0;
+            this.detailToggleInUniforms.uProgress.value = 1;
+            this.detailToggleInMesh.position.set(0, 0, 0);
+            this.detailToggleInMesh.scale.set(1, 1, 1);
+          }
+        } else {
+          this.detailToggleOutMesh.visible = false;
+          this.detailToggleOutUniforms.uActive.value = 0;
+          if (this.detailToggleMode === "visible") {
+            this.detailToggleInMesh.visible = true;
+            this.detailToggleInMesh.position.set(0, 0, 0);
+            this.detailToggleInMesh.scale.set(1, 1, 1);
+            this.detailToggleInUniforms.uActive.value = 0;
+            this.detailToggleInUniforms.uHiding.value = 0;
+            this.detailToggleInUniforms.uModeSwitch.value = 0;
+            this.detailToggleInUniforms.uProgress.value = 1;
+          } else if (this.detailToggleMode === "reveal") {
+            const raw = clamp01(
+              this.detailToggleElapsed / this.detailToggleDuration,
+            );
+            applyStateMotion(
+              this.detailToggleInMesh,
+              this.detailToggleInUniforms,
+              easeMistReveal(raw),
+              false,
+              false,
+            );
+          } else if (this.detailToggleMode === "hide") {
+            const raw = clamp01(
+              this.detailToggleElapsed / this.detailToggleDuration,
+            );
+            applyStateMotion(
+              this.detailToggleInMesh,
+              this.detailToggleInUniforms,
+              easeOutQuad(raw),
+              true,
+              false,
+            );
+          }
+        }
+      }
+    }
+    const fixedDetailBasis: FixedDetailCameraBasis | undefined = this
+      .fixedDetailCameraHeld
+      ? {
+          index: this.selectedIndex,
+          x: this.model.position.x,
+          // Measure from the rendered pose with only this frame's extraction
+          // and transient lifts removed. The slot field, shoulder wave, rail
+          // and reveal offset are already represented in this baseline.
+          y:
+            this.model.position.y -
+            this.lift.value -
+            selectedVisualLift -
+            hoverLift(this.selectedCell),
+          z: this.model.position.z,
+          aspect: this.container.clientWidth / this.container.clientHeight,
+          drawer: Math.round(this.detailDrawer.value * 1000) / 1000,
+        }
+      : undefined;
     if (
       this.fixedDetailCameraHeld &&
       this.fixedDetailCameraPose &&
@@ -4391,8 +6355,9 @@ export class ArchiveScene {
       }
     }
     // The long lens keeps the case edges parallel as the selected file rises.
-    const fixedPose =
-      this.fixedDetailCameraHeld ? this.fixedDetailCameraPose : undefined;
+    const fixedPose = this.fixedDetailCameraHeld
+      ? this.fixedDetailCameraPose
+      : undefined;
     if (fixedPose) {
       if (!this.motion.detailTransition) {
         this.detailCameraMove.value = this.targetDetail;
@@ -4463,7 +6428,7 @@ export class ArchiveScene {
         );
         previewAim.addScaledVector(
           up,
-          (framing.previewY - 0.5) * height / pixelScale,
+          ((framing.previewY - 0.5) * height) / pixelScale,
         );
         cameraAim.copy(previewAim);
       } else {
@@ -4480,9 +6445,10 @@ export class ArchiveScene {
         cameraPosition.x += this.pointer.x * 0.12;
         cameraPosition.y -= this.pointer.y * 0.12;
       }
-      const cameraTransition = this.targetDetail || this.detail > 0.01
-        ? this.motion.detailTransition
-        : this.motion.selectionTransition;
+      const cameraTransition =
+        this.targetDetail || this.detail > 0.01
+          ? this.motion.detailTransition
+          : this.motion.selectionTransition;
       const cameraBlend =
         !this.cameraInitialized || this.fixedDetailCameraHeld
           ? 1
@@ -4528,10 +6494,7 @@ export class ArchiveScene {
     this.fillLight.color.copy(LIGHT_OVERVIEW_FILL_COLOR);
     this.fillLight.intensity = 0.07;
     this.fillLight.position.copy(LIGHT_OVERVIEW_FILL_POSITION);
-    this.overviewTrackOffset.value.set(
-      trackX,
-      this.rail.value + entryZ,
-    );
+    this.overviewTrackOffset.value.set(trackX, this.rail.value + entryZ);
     const bar = this.slotUnderlights.barPosition;
     const stripX = (bar.lane - 2) * COLUMN_SPACING - trackX;
     const stripZ =
@@ -4540,13 +6503,8 @@ export class ArchiveScene {
       this.rail.value +
       OVERVIEW_RECT_LIGHT_Z_OFFSET;
     const stripGain =
-      this.slotUnderlights.barIntensity *
-      this.overviewSlotLightGain.value;
-    this.overviewAreaLight.position.set(
-      stripX,
-      OVERVIEW_RECT_LIGHT_Y,
-      stripZ,
-    );
+      this.slotUnderlights.barIntensity * this.overviewSlotLightGain.value;
+    this.overviewAreaLight.position.set(stripX, OVERVIEW_RECT_LIGHT_Y, stripZ);
     this.overviewAreaLight.intensity =
       OVERVIEW_RECT_LIGHT_INTENSITY * stripGain * (1 - detail);
     const extractedFromSlot = THREE.MathUtils.smoothstep(
@@ -4576,7 +6534,8 @@ export class ArchiveScene {
       this.camera.updateProjectionMatrix();
       // Keep the light-overview calibration in the projection matrix so camera
       // picking, coverage and WebGL rendering share one optical transform.
-      this.camera.projectionMatrix.elements[0] *= LIGHT_OVERVIEW_HORIZONTAL_SCALE;
+      this.camera.projectionMatrix.elements[0] *=
+        LIGHT_OVERVIEW_HORIZONTAL_SCALE;
       this.camera.projectionMatrix.elements[5] *= LIGHT_OVERVIEW_VERTICAL_SCALE;
       this.camera.projectionMatrixInverse
         .copy(this.camera.projectionMatrix)
@@ -4589,7 +6548,13 @@ export class ArchiveScene {
     }
     // Build and compact the instance set only after the actual damped camera
     // is final for this frame. Picking uses the same packed index-to-cell map.
-    this.cells = this.visibility.update(this.camera, fog.far, trackX, entryZ + this.rail.value, false);
+    this.cells = this.visibility.update(
+      this.camera,
+      fog.far,
+      trackX,
+      entryZ + this.rail.value,
+      false,
+    );
     this.hiddenCellKeys.clear();
     for (const o of this.outgoing) this.hiddenCellKeys.add(cellKey(o.cell));
     this.hiddenCellKeys.add(cellKey(this.selectedCell));
@@ -4599,20 +6564,29 @@ export class ArchiveScene {
     this.shadowCoverage?.begin();
     const primaryInstance = this.instances[0];
     if (primaryInstance) {
-      this.matrixUpdates ??= new InstanceUpdates(primaryInstance.instanceMatrix);
+      this.matrixUpdates ??= new InstanceUpdates(
+        primaryInstance.instanceMatrix,
+      );
     }
     if (this.slotLightAttribute) {
       this.slotLightUpdates ??= new InstanceUpdates(this.slotLightAttribute);
     }
     if (this.neighborLightAttribute) {
-      this.neighborLightUpdates ??= new InstanceUpdates(this.neighborLightAttribute);
+      this.neighborLightUpdates ??= new InstanceUpdates(
+        this.neighborLightAttribute,
+      );
     }
     if (this.lateralLightAttribute) {
-      this.lateralLightUpdates ??= new InstanceUpdates(this.lateralLightAttribute);
+      this.lateralLightUpdates ??= new InstanceUpdates(
+        this.lateralLightAttribute,
+      );
     }
     if (this.topRailLightAttribute) {
-      this.topRailLightUpdates ??= new InstanceUpdates(this.topRailLightAttribute);
+      this.topRailLightUpdates ??= new InstanceUpdates(
+        this.topRailLightAttribute,
+      );
     }
+    let hoverStickerFound = false;
     for (const cell of this.cells) {
       const { row, lane } = cell;
       if (this.hiddenCellKeys.has(cellKey(cell))) continue;
@@ -4621,9 +6595,9 @@ export class ArchiveScene {
       const z = (row - 15.5) * ROW_SPACING + entryZ + this.rail.value;
       if (!this.visibility.intersects(x, y, z)) continue;
 
-      const slope = field(row + .5, lane) - field(row - .5, lane);
+      const slope = field(row + 0.5, lane) - field(row - 0.5, lane);
       this.dummy.position.set(x, y, z);
-      this.dummy.rotation.set(slope * .024, 0, 0);
+      this.dummy.rotation.set(slope * 0.024, 0, 0);
       this.dummy.scale.set(1, 1, 1);
       this.dummy.updateMatrix();
       this.shadowCoverage?.add(this.dummy.matrix);
@@ -4635,10 +6609,11 @@ export class ArchiveScene {
         this.hoverBadgeInstance.value = i;
         this.drawHoverBadge(fileAtCell(cell, this.coordinateOrigin.row));
       }
-      this.slotLightUpdates?.scalar(
-        i,
-        this.slotUnderlights.directFor(cell),
-      );
+      if (this.hoverStickerCell && sameCell(cell, this.hoverStickerCell)) {
+        hoverStickerFound = true;
+        this.hoverStickerMatrix.copy(this.dummy.matrix);
+      }
+      this.slotLightUpdates?.scalar(i, this.slotUnderlights.directFor(cell));
       this.neighborLightUpdates?.scalar(
         i,
         this.slotUnderlights.reflectionFor(cell),
@@ -4659,14 +6634,10 @@ export class ArchiveScene {
     const visibleMatricesChanged = this.matrixUpdates?.commit() ?? false;
     const shadowMatricesChanged = this.shadowCoverage?.commit() ?? false;
     const slotLightsChanged = this.slotLightUpdates?.commit() ?? false;
-    const neighborLightsChanged =
-      this.neighborLightUpdates?.commit() ?? false;
-    const lateralLightsChanged =
-      this.lateralLightUpdates?.commit() ?? false;
-    const topRailLightsChanged =
-      this.topRailLightUpdates?.commit() ?? false;
-    const geometryChanged =
-      visibleMatricesChanged || shadowMatricesChanged;
+    const neighborLightsChanged = this.neighborLightUpdates?.commit() ?? false;
+    const lateralLightsChanged = this.lateralLightUpdates?.commit() ?? false;
+    const topRailLightsChanged = this.topRailLightUpdates?.commit() ?? false;
+    const geometryChanged = visibleMatricesChanged || shadowMatricesChanged;
     const matricesChanged =
       geometryChanged ||
       slotLightsChanged ||
@@ -4675,6 +6646,57 @@ export class ArchiveScene {
       topRailLightsChanged;
     for (const inst of this.instances) {
       inst.count = this.drawnCells.length;
+    }
+    if (
+      this.hoverStickerGroup &&
+      this.hoverStickerFrontMat &&
+      this.hoverStickerShadowMat
+    ) {
+      if (this.hoverStickerCell && hoverStickerFound) {
+        const hoverFile = fileAtCell(
+          this.hoverStickerCell,
+          this.coordinateOrigin.row,
+        );
+        this.bindHoverStickerTexture(hoverFile);
+        const direct = THREE.MathUtils.clamp(
+          this.slotUnderlights.directFor(this.hoverStickerCell) *
+            this.overviewSlotLightGain.value,
+          0,
+          1,
+        );
+        const liftBlend = THREE.MathUtils.smoothstep(
+          hoverLift(this.hoverStickerCell),
+          0.03,
+          HOVER_PREVIEW_LIFT * 0.75,
+        );
+        this.hoverStickerMatrix.decompose(
+          this.hoverStickerPos,
+          this.hoverStickerQuat,
+          this.hoverStickerScale,
+        );
+        this.hoverStickerGroup.position
+          .set(STICKER_LOCAL_X, STICKER_LOCAL_Y, this.glassFrontZ + STICKER_PLATE_LIFT)
+          .applyMatrix4(this.hoverStickerMatrix);
+        this.hoverStickerGroup.quaternion.copy(this.hoverStickerQuat);
+        this.hoverStickerGroup.rotateZ(STICKER_TILT_Z);
+        this.hoverStickerFrontMat.color
+          .copy(HOVER_STICKER_SHADED_COLOR)
+          .lerp(HOVER_STICKER_LIT_COLOR, direct);
+        this.hoverStickerFrontMat.emissive
+          .copy(HOVER_STICKER_SHADED_EMISSIVE)
+          .lerp(HOVER_STICKER_LIT_EMISSIVE, direct);
+        this.hoverStickerFrontMat.emissiveIntensity = THREE.MathUtils.lerp(
+          0.1,
+          0.5,
+          direct,
+        );
+        this.hoverStickerFrontMat.opacity = liftBlend;
+        this.hoverStickerShadowMat.opacity =
+          0.52 * liftBlend * THREE.MathUtils.lerp(0.55, 1, direct);
+        this.hoverStickerGroup.visible = liftBlend > 0.01;
+      } else {
+        this.hoverStickerGroup.visible = false;
+      }
     }
     // Picking uses only the first instanced surface. The other batches disable
     // renderer culling and do not need an O(n) bound recomputation each frame.
@@ -4698,9 +6720,7 @@ export class ArchiveScene {
     }
     this.clearance = this.model.position.y - selectedVisualLift - neighborTop;
     const detailSettled =
-      Boolean(this.targetDetail) &&
-      detail > 0.9 &&
-      this.pulseGain < 0.01;
+      Boolean(this.targetDetail) && detail > 0.9 && this.pulseGain < 0.01;
     this.canInspect = detailSettled && this.clearance > 0.3;
     const fixedDetailRaised =
       detailSettled &&
@@ -4801,43 +6821,94 @@ export class ArchiveScene {
         this.overviewBadgeHeightFraction.value,
         this.overviewBadgeHeadingEdge.value,
       );
-      state.floats(...this.camera.projectionMatrix.elements, ...this.camera.matrixWorldInverse.elements,
+      state.floats(
+        ...this.camera.projectionMatrix.elements,
+        ...this.camera.matrixWorldInverse.elements,
         ...this.camera.position.toArray(),
-        fog.near, fog.far,
-        this.studioSkyLight.intensity, this.scene.environmentIntensity,
-        this.overviewTrackOffset.value.x, this.overviewTrackOffset.value.y,
+        fog.near,
+        fog.far,
+        this.studioSkyLight.intensity,
+        this.scene.environmentIntensity,
+        this.overviewTrackOffset.value.x,
+        this.overviewTrackOffset.value.y,
         this.overviewSlotLightGain.value,
         this.overviewSelectedSlotProximity.value,
         ...this.overviewAreaLight.position.toArray(),
         this.overviewAreaLight.intensity,
         this.intro?.elapsed ?? -1,
         ...this.light.position.toArray(),
-        this.light.intensity, ...this.light.target.position.toArray(),
-        ...this.fillLight.position.toArray(), this.fillLight.intensity,
-        bokehUniforms.focus.value, bokehUniforms.aperture.value);
+        this.light.intensity,
+        ...this.light.target.position.toArray(),
+        ...this.fillLight.position.toArray(),
+        this.fillLight.intensity,
+        bokehUniforms.focus.value,
+        bokehUniforms.aperture.value,
+      );
       for (const light of this.overviewSlotLightsUniform.value) {
         state.floats(light.x, light.y, light.z);
       }
-      this.scene.traverse(object => {
+      this.scene.traverse((object) => {
         state.add(object.id, Number(object.visible));
         if (!(object instanceof THREE.Mesh)) return;
-        object.modelViewMatrix.multiplyMatrices(this.camera.matrixWorldInverse, object.matrixWorld);
+        object.modelViewMatrix.multiplyMatrices(
+          this.camera.matrixWorldInverse,
+          object.matrixWorld,
+        );
         object.normalMatrix.getNormalMatrix(object.modelViewMatrix);
-        state.floats(...object.modelViewMatrix.elements, ...object.normalMatrix.elements, ...object.matrixWorld.elements);
+        state.floats(
+          ...object.modelViewMatrix.elements,
+          ...object.normalMatrix.elements,
+          ...object.matrixWorld.elements,
+        );
         const mat = object.material as THREE.MeshPhysicalMaterial;
         // Three increments material.version for its own double-sided transmission
         // passes. Track application-controlled inputs, not that render-side counter.
-        state.add(object.geometry.id, mat.uuid, mat.map?.uuid, mat.map?.version ?? 0);
+        state.add(
+          object.geometry.id,
+          mat.uuid,
+          mat.map?.uuid,
+          mat.map?.version ?? 0,
+        );
         state.floats(
-          mat.opacity, mat.roughness, mat.metalness, mat.transmission, mat.thickness,
-          mat.attenuationDistance, mat.clearcoat, mat.clearcoatRoughness,
-          mat.color.r, mat.color.g, mat.color.b,
-          mat.attenuationColor?.r ?? 0, mat.attenuationColor?.g ?? 0, mat.attenuationColor?.b ?? 0);
-        for (const name of ['appearance', 'glassClarity'])
+          mat.opacity,
+          mat.roughness,
+          mat.metalness,
+          mat.transmission,
+          mat.thickness,
+          mat.attenuationDistance,
+          mat.clearcoat,
+          mat.clearcoatRoughness,
+          mat.color.r,
+          mat.color.g,
+          mat.color.b,
+          mat.emissiveIntensity ?? 0,
+          mat.emissive?.r ?? 0,
+          mat.emissive?.g ?? 0,
+          mat.emissive?.b ?? 0,
+          mat.attenuationColor?.r ?? 0,
+          mat.attenuationColor?.g ?? 0,
+          mat.attenuationColor?.b ?? 0,
+        );
+        for (const name of ["appearance", "glassClarity"])
           state.floats(object.userData[name]?.value ?? 0);
+        const mistDissolve = object.userData.mistDissolve as
+          MistDissolveShaderUniforms | undefined;
+        const stickerPeel = object.userData.stickerShadowPeel as
+          { value: THREE.Vector4 } | undefined;
+        state.floats(
+          mistDissolve?.uActive.value ?? 0,
+          mistDissolve?.uProgress.value ?? 0,
+          mistDissolve?.uHiding.value ?? 0,
+          mistDissolve?.uModeSwitch.value ?? 0,
+          // 四角必须全部进入签名：只取最大值会让非右下角的 0~0.24 段运动不触发
+          // 重绘，画面停在旧帧。
+          stickerPeel?.value.x ?? 0,
+          stickerPeel?.value.y ?? 0,
+          stickerPeel?.value.z ?? 0,
+          stickerPeel?.value.w ?? 0,
+        );
         const slotLight = object.userData.slotLight as
-          | OverviewSlotLightUniforms
-          | undefined;
+          OverviewSlotLightUniforms | undefined;
         state.floats(
           slotLight?.direct.value ?? 0,
           slotLight?.reflection.value ?? 0,
@@ -4854,18 +6925,28 @@ export class ArchiveScene {
             this.topRailLightAttribute?.version ?? 0,
           );
       });
-      if (!state.end()) { this.reusedFrames++; return; }
+      if (!state.end()) {
+        this.reusedFrames++;
+        return;
+      }
     }
     this.renderedFrames++;
     const shadow = this.shadowState;
     shadow.begin();
-    shadow.add(this.light.shadow.mapSize.x, Number(this.renderer.shadowMap.enabled));
-    shadow.floats(...this.light.matrixWorld.elements, ...this.light.target.matrixWorld.elements);
-    this.scene.traverseVisible(object => {
+    shadow.add(
+      this.light.shadow.mapSize.x,
+      Number(this.renderer.shadowMap.enabled),
+    );
+    shadow.floats(
+      ...this.light.matrixWorld.elements,
+      ...this.light.target.matrixWorld.elements,
+    );
+    this.scene.traverseVisible((object) => {
       if (!(object instanceof THREE.Mesh) || !object.castShadow) return;
       shadow.add(object.id, object.geometry.id);
       shadow.floats(...object.matrixWorld.elements);
-      if (object instanceof THREE.InstancedMesh) shadow.add(object.count, object.instanceMatrix.version);
+      if (object instanceof THREE.InstancedMesh)
+        shadow.add(object.count, object.instanceMatrix.version);
     });
     // While breathing or rapidly sliding/returning outgoing cards, update shadows
     // every other rendered frame while tracking staleness for exact reuse.
@@ -4879,16 +6960,24 @@ export class ArchiveScene {
       (shadowChanged || this.shadowStale) &&
       (!throttleShadow || this.shadowTick++ % 2 === 0);
     this.renderer.shadowMap.needsUpdate = shouldUpdateShadow;
-    this.shadowStale = shouldUpdateShadow ? false : this.shadowStale || shadowChanged;
+    this.shadowStale = shouldUpdateShadow
+      ? false
+      : this.shadowStale || shadowChanged;
     if (this.superPerformance) this.renderer.render(this.scene, this.camera);
     else this.composer.render();
   }
   /** 0 while the array is driven by input, approaches 1 once it only breathes. */
-  get idleAmount() { return this.idleGain; }
+  get idleAmount() {
+    return this.idleGain;
+  }
   /** True while the array is in its settled breathing state. */
-  get isIdle() { return this.idleNow; }
+  get isIdle() {
+    return this.idleNow;
+  }
   /** Cheap wake signal for the frame governor and the idle settle timer. */
-  wake() { this.lastInteraction = this.clock; }
+  wake() {
+    this.lastInteraction = this.clock;
+  }
   get detailVisibility() {
     return ease((this.detail - 0.25) / 0.55);
   }
@@ -4899,7 +6988,10 @@ export class ArchiveScene {
       const p = this.model
         .localToWorld(new THREE.Vector3(x, y, z))
         .project(this.camera);
-      return [Math.round((p.x + 1) * this.container.clientWidth / 2), Math.round((1 - p.y) * this.container.clientHeight / 2)];
+      return [
+        Math.round(((p.x + 1) * this.container.clientWidth) / 2),
+        Math.round(((1 - p.y) * this.container.clientHeight) / 2),
+      ];
     };
     return {
       cardPlaneZ: this.cardPlaneZ,
@@ -4939,11 +7031,13 @@ export class ArchiveScene {
       hoverCell: this.hoverCell ? { ...this.hoverCell } : null,
       hoverLifts: Object.fromEntries(this.hoverLifts),
       dragTrack: this.dragTrack ? { ...this.dragTrack } : null,
-      archiveMomentum: this.archiveMomentum ? {
-        phase: this.archiveMomentum.motion.phase,
-        value: this.archiveMomentum.motion.value,
-        velocity: this.archiveMomentum.motion.velocity,
-      } : null,
+      archiveMomentum: this.archiveMomentum
+        ? {
+            phase: this.archiveMomentum.motion.phase,
+            value: this.archiveMomentum.motion.value,
+            velocity: this.archiveMomentum.motion.velocity,
+          }
+        : null,
       holdingArchive: this.holdingArchive,
       dragProjection: this.dragProjection(),
       dragMapping: this.archiveDrag.active ? "free" : null,
@@ -4959,9 +7053,18 @@ export class ArchiveScene {
       rotation: this.rotation,
       clearance: this.clearance,
       canInspect: this.canInspect,
+      detailCardOpen: this.detailDrawerOpen,
+      detailDrawer: Math.round(this.detailDrawer.value * 1000) / 1000,
+      detailHover: this.detailHoveredHotspot,
+      detailToggle: {
+        state: this.detailToggleMode,
+        visibility: Math.round(this.detailToggleVisibility * 1000) / 1000,
+        switching: this.detailToggleSwitchActive,
+      },
       returnPhase: this.returnY !== null ? "aligning" : "lowering",
       extraction: Math.round(this.lift.value * 1000) / 1000,
-      appearance: Math.round(ease(this.lift.value / OVERVIEW_LIFT) * 1000) / 1000,
+      appearance:
+        Math.round(ease(this.lift.value / OVERVIEW_LIFT) * 1000) / 1000,
       cameraDetail: Math.round(this.detail * 1000) / 1000,
       idleGain: this.idleGain,
       cameraDistance: this.camera.position.distanceTo(this.cameraAim),
@@ -4998,8 +7101,7 @@ export class ArchiveScene {
           return {
             offset,
             direct:
-              Math.round(this.slotUnderlights.directFor(cell) * 10000) /
-              10000,
+              Math.round(this.slotUnderlights.directFor(cell) * 10000) / 10000,
             reflection:
               Math.round(this.slotUnderlights.reflectionFor(cell) * 10000) /
               10000,
@@ -5019,11 +7121,9 @@ export class ArchiveScene {
               Math.round(this.slotUnderlights.reflectionFor(cell) * 10000) /
               10000,
             lateral:
-              Math.round(this.slotUnderlights.lateralFor(cell) * 10000) /
-              10000,
+              Math.round(this.slotUnderlights.lateralFor(cell) * 10000) / 10000,
             topRail:
-              Math.round(this.slotUnderlights.topRailFor(cell) * 10000) /
-              10000,
+              Math.round(this.slotUnderlights.topRailFor(cell) * 10000) / 10000,
           };
         }),
       },
@@ -5034,14 +7134,16 @@ export class ArchiveScene {
         position: this.overviewAreaLight.position
           .toArray()
           .map((value) => Math.round(value * 10000) / 10000),
-        intensity:
-          Math.round(this.overviewAreaLight.intensity * 10000) / 10000,
+        intensity: Math.round(this.overviewAreaLight.intensity * 10000) / 10000,
         width: this.overviewAreaLight.width,
         height: this.overviewAreaLight.height,
       },
       returningAppearance: this.outgoing.map((o) => ({
         slot: o.slot,
-        clarity: o.group.children.find(child => surfaceRole(child.userData.surface as string) === REVEAL_ROLE)?.userData.glassClarity?.value,
+        clarity: o.group.children.find(
+          (child) =>
+            surfaceRole(child.userData.surface as string) === REVEAL_ROLE,
+        )?.userData.glassClarity?.value,
         cell: { ...o.cell },
         lift: o.lift.value,
         quality: ease(o.lift.value / OVERVIEW_LIFT),

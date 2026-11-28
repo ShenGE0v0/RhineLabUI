@@ -11,8 +11,7 @@ const files=all.map(path=>path.replaceAll('\\','/')).filter(path=>
   /^(assets|icons|archives|licenses)\/[^/]+\.[^/]+$/.test(path)||
   /^assets\/model-providers\/[a-z\d-]+\.svg$/.test(path)||
   covers.has(path)||
-  /^fonts\/.*\.(woff2|pdf|txt|json|md)$/.test(path)||
-  /^audio\/(atmosphere|motif|pulse)\.ogg$/.test(path)
+  /^fonts\/.*\.(woff2|pdf|txt|json|md)$/.test(path)
 ).filter(path=>!/^assets\/archive-(cassette|assembly)\.glb$/.test(path)).sort();
 if(!files.some(path=>/^assets\/index-.*\.js$/.test(path)))throw Error('Build the application before generating the offline cache.');
 for(const cover of covers)if(!files.includes(cover))throw Error(`Missing built cover: ${cover}`);
